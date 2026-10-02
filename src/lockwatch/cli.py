@@ -45,6 +45,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("db-update", help="脆弱性 DB を取り直す")
 
+    sub.add_parser("gui", help="状態・結果・設定の画面を開く（pythonw -m lockwatch gui なら黒い窓が出ない）")
+
     st = sub.add_parser("status", help="使える状態か（osv-scanner・受け渡し・最後の照合・定期実行）を表示する")
     st.add_argument("--json", action="store_true", help="JSON で出す")
 
@@ -354,6 +356,9 @@ def _dispatch(args, config_path: Path, cfg: dict) -> int:
         return _cmd_report(args, cfg)
     if args.command == "status":
         return _cmd_status(args, cfg)
+    if args.command == "gui":
+        from .gui import run  # tkinter は画面を開くときだけ読む
+        return run(config_path, args.data, args.targets)
     return _cmd_db_update(args, cfg)
 
 

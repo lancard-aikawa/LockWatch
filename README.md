@@ -40,6 +40,20 @@
 
 ## 使い方
 
+画面で使うなら:
+
+```cmd
+.venv\Scripts\pythonw.exe -m lockwatch gui    :: 状態・結果・設定の画面（黒い窓は出ない）
+```
+
+- **状態**: LockWatch・osv-scanner の版、受け渡し、最後の照合、手元の DB、定期実行。全体の照合・DB の取り直し・定期実行の登録 / 解除もここから
+- **結果**: 脆弱性の一覧（重い順）。深刻度や「保守終了」などで隠せる。行をダブルクリックすると osv.dev が開く
+- **設定**: `lockwatch.json` の項目を編集して保存（`config set` と同じ検査）
+
+RepoTether の設定の「脆弱性」タブの「LockWatch を開く」からも開ける。
+
+コマンドで使うなら:
+
 ```cmd
 uv run lockwatch scan                         :: targets.json の全部を照合
 uv run lockwatch scan --repo C:\Repos\x       :: 1 つだけ（公開か分からないので手元の DB で照合）。結果は書かずに表示する
