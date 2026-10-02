@@ -27,9 +27,13 @@ jobs:
         with:
           python-version: "3.13"
 
+      # タグ名はスクリプトに埋め込まず、環境変数で渡して形を確かめてから使う (Actions の式の展開によるスクリプトの注入を防ぐ)
       - name: 版と CHANGELOG を検査し、本文を作る
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          python .github/release_notes.py '${{ github.ref_name }}' dist/release-body.md
+          if ($env:TAG -notmatch '^v[0-9A-Za-z.\-]+$') { throw "タグの形が違います: $env:TAG" }
+          python .github/release_notes.py $env:TAG dist/release-body.md
           if ($LASTEXITCODE -ne 0) { throw "版か CHANGELOG が合っていません" }
 
       - name: テスト
@@ -43,8 +47,10 @@ jobs:
       - name: Release を作って公開する
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
         run: |
-          $tag = '${{ github.ref_name }}'
+          $tag = $env:TAG
+          if ($tag -notmatch '^v[0-9A-Za-z.\-]+$') { throw "タグの形が違います: $tag" }
           $title = 'LockWatch ' + ($tag -replace '^v', '')
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
