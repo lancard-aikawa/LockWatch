@@ -43,11 +43,14 @@
 画面で使うなら:
 
 ```cmd
-.venv\Scripts\pythonw.exe -m lockwatch gui    :: 状態・結果・設定の画面（黒い窓は出ない）
+scripts\lockwatch-gui.cmd    :: 状態・結果・設定の画面（ダブルクリックでも開く。黒い窓は出ない）
 ```
 
+uv 0.11 が作る `.venv\Scripts\pythonw.exe` はコンソール用の `python.exe` と同じもので、そこから開くと黒い窓も開く。
+`lockwatch-gui.cmd` は `.venv\pyvenv.cfg` の `home` にある本体の `pythonw.exe` で `scripts\lockwatch-launch.py` を動かす（`src` を読み込み先に足す。実行時の依存が無いので `.venv` は要らない）。
+
 - **状態**: LockWatch・osv-scanner の版、受け渡し、最後の照合、手元の DB、定期実行。全体の照合・DB の取り直し・定期実行の登録 / 解除もここから
-- **結果**: 脆弱性の一覧（重い順）。深刻度や「保守終了」などで隠せる。行をダブルクリックすると osv.dev が開く
+- **結果**: 脆弱性の一覧（重い順）。深刻度や「保守終了」などで隠せる。行をダブルクリックすると osv.dev が開く。「診断書を出す」でリポジトリごとの診断書（HTML）を書いて一覧を開く
 - **設定**: `lockwatch.json` の項目を編集して保存（`config set` と同じ検査）
 
 RepoTether の設定の「脆弱性」タブの「LockWatch を開く」からも開ける。
@@ -60,6 +63,7 @@ uv run lockwatch scan --repo C:\Repos\x       :: 1 つだけ（公開か分か�
 uv run lockwatch scan --id <id> --check       :: 照合はせず、前回の結果がそのまま返るかを答える
 uv run lockwatch report --new                 :: 前回から新しく出たもの
 uv run lockwatch report --hide unmaintained   :: 保守されていないだけの知らせを消して表示（重ねて書ける）
+uv run lockwatch report --html                :: リポジトリごとの診断書（HTML）を data\reports\ に書く（一覧は index.html。ブラウザで絞り込み・並べ替えができる）
 uv run lockwatch db-update                    :: 脆弱性 DB を取り直す
 uv run lockwatch status                       :: 使える状態か（osv-scanner・受け渡し・最後の照合・定期実行）
 uv run lockwatch targets check targets.json   :: 受け渡しのファイルを検査し、オンライン・手元の振り分けを表示
@@ -72,12 +76,12 @@ uv run lockwatch config show
 
 ## 定期実行
 
-タスクスケジューラに毎日 1 回の scan を登録する。リポジトリの `.venv` の `pythonw.exe` で動くので窓は開かない。
+タスクスケジューラに毎日 1 回の scan を登録する。本体の Python の `pythonw.exe` と `scripts\lockwatch-launch.py` で動くので窓は開かない。
 優先度は「通常より低い」。PC が止まっていて逃した回は、次に起動したときに動く。
 
 ```cmd
-pwsh -File scripts\register-task.ps1                :: 登録（毎日 9:00。-At 13:30 で時刻を変える）
-pwsh -File scripts\register-task.ps1 -Unregister    :: 消す
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1                :: 登録（毎日 9:00。-At 13:30 で時刻を変える）
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1 -Unregister    :: 消す
 ```
 
 結果は `data\last-run.log`（毎回上書き）と、タスクの「前回の実行結果」

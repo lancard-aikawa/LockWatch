@@ -149,6 +149,9 @@ class ScanTest(unittest.TestCase):
         self.assertEqual(r["empty"]["status"], "no-lockfile")
         self.assertEqual(r["gone"]["status"], "error")
         self.assertIn("フォルダがありません", r["gone"]["error"])
+        # 診断書の見出しに使う（mode だけでは online_public: false のときに区別できない）
+        self.assertEqual({k: e["visibility"] for k, e in r.items()},
+                         {"pub": "public", "priv": "private", "unk": "unknown", "empty": "public", "gone": "private"})
         self.assertEqual(doc["new"], [])  # 初回は空
         self.assertEqual(len(list((self.data / "results").glob("2*.json"))), 1)
 

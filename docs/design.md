@@ -105,6 +105,7 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
   "repos": {
     "github.com/example/web-app": {
       "status": "ok",
+      "visibility": "public",
       "mode": "online",
       "lockfiles": ["pnpm-lock.yaml", "src-tauri/Cargo.lock"],
       "findings": [
@@ -131,6 +132,8 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 ```
 
 - `status`: `ok` / `no-lockfile`（lock ファイルが無い、または osv-scanner の終了コード 128）/ `error`（理由の文を `error` に入れる。RepoTether はそれを出す）
+- `visibility`: `targets.json` の値（`--repo` なら `unknown`）。`mode` だけでは、`online_public: false` のときに公開か非公開かが分からないため（診断書の見出しに使う、§7.1）。
+  0.2.0 までの `latest.json` には無い。無ければ `mode` が `online` なら `public`、それ以外は分からないとして扱う
 - `mode`: `online` / `offline`（どちらで照合したか。§4 の約束を後から確かめられるように残す）
 - `scanned_at`（リポジトリごと）: そのリポジトリを照合した時刻。`scan --id` で 1 つだけ差し替えたときに、ほかと時刻がずれるため
 - `findings` は OSV の記録から必要なものだけを抜く。説明文（`details`）・参照（`references`）は入れない
@@ -225,7 +228,8 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 | `lockwatch scan --id <id>` | `targets.json` のうちその 1 つ。`latest.json` のそのリポジトリだけ差し替える（`new` もそのリポジトリの分だけ入れ替える。過去の結果は書かない） |
 | `lockwatch scan --id <id> --check` | 事前チェック。照合はせず、今照合したら前回の結果（キャッシュ）がそのまま返るかを JSON で答える（`--repo` とも使える。読むだけなので排他は取らない） |
 | `lockwatch scan --no-cache` | キャッシュを読まずに照合し直す（書くのはいつもどおり）。`--id` / `--repo` とも使える |
-| `lockwatch report` | `latest.json` を表にして表示（`--new` で新しいものだけ、`--json`。`--hide <種類>` を重ねて消す: `unmaintained` などの `informational` の値か、`low` などの `severity` の値） |
+| `lockwatch report` | `latest.json` を表にして表示（`--new` で新しいものだけ、`--json`。`--hide <種類>` を重ねて消す: `unmaintained` などの `informational` の値か、`low` などの `severity` の値。`--id <id>` でそのリポジトリだけ） |
+| `lockwatch report --html` | リポジトリごとの診断書（HTML）を書く（§7.1） |
 | `lockwatch status` | 使える状態かを表示する（`--json`）。LockWatch の版、osv-scanner の場所と版（`--version` だけ呼ぶ）、データと targets.json の場所と件数、最後の照合、手元の DB の取得時刻、定期実行（タスク「LockWatch scan」）が登録されているか。RepoTether の設定の「確かめる」が使う |
 | `lockwatch db-update` | 脆弱性 DB を取り直す。手元の DB で照合するリポジトリ（§4）を、取り直し付きで 1 回照合する。結果はキャッシュにだけ入れ、`results/` は書かない |
 | `lockwatch config show / set` | 設定（SessionVault と同じ作り） |
@@ -239,18 +243,50 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
     消した件数は表示の最後に出す（消したことを忘れない）
   - 表は、リポジトリごとに 1 行（状態・件数）と、その下に重い順の findings。`--new` は `new` の一覧だけ
   - `--json` は `latest.json` と同じ形で、`--hide` を当てた後のもの。`--new` と一緒なら `new` の配列だけ
+  - `--id` はそのリポジトリだけにする（`new` もそのリポジトリの分だけ）。`latest.json` に無ければ終了コード 2
   - `latest.json` がまだ無ければ、その旨を出して終了コード 2
 - 同時に 2 つ走らせない。`<data>/lock` を OS のファイルロック（Windows は `msvcrt.locking`）で押さえ、取れなければ「実行中」で終わる（終了コード 3）。
   ファイルがあるだけでは実行中としない（落ちたあとに残ったファイルで止まらないように）
 - 終了コード: 0 = 終わった（脆弱性の有無は問わない）、1 = 想定外の失敗（LockWatch の誤り。`--log` なら例外の内容を書く）、2 = 引数の誤り、3 = 実行中、4 = osv-scanner が無い・失敗した
   （1 回でも失敗したら 4。結果はそれでも書き、失敗したリポジトリは `error` にする。フォルダが無いだけの `error` は 0）
 - 定期実行はタスクスケジューラで 1 日 1 回（`scripts/register-task.ps1`。SessionVault と同じ作り）
-  - `.venv\Scripts\pythonw.exe -m lockwatch --log scan` を、既定で毎日 9:00 に。止まっていて逃した回は、次に起動したときに動かす
+  - `<home>\pythonw.exe scripts\lockwatch-launch.py --log scan` を、既定で毎日 9:00 に（`<home>` は `.venv\pyvenv.cfg` の `home`。
+    uv 0.11 の `.venv\Scripts\pythonw.exe` はコンソール用で黒い窓が開くため、使わない。`lockwatch-launch.py` が `src` を読み込み先に足す）。止まっていて逃した回は、次に起動したときに動かす
   - 窓を出さない（`pythonw`、osv-scanner は `CREATE_NO_WINDOW`）。優先度は 7（通常より低い。子の osv-scanner も引き継ぐ）
   - ログオンしているときだけ動かす（パスワードを預けない）。ネットにつながっていないときは動かさない（公開のものの照合が失敗するため）
   - 同時に 2 つは動かさない（タスクの設定と §7 の排他の両方）。1 回は 1 時間まで（DB の取り直しが重なっても足りる）
   - `--log`（どのサブコマンドにも付く）: 今回の出力（標準出力と標準エラー）を `<data>/last-run.log` に書く（毎回上書き）。
     `pythonw` では出力が捨てられるため。結果は `last-run.log` と、タスクの「前回の実行結果」（終了コード、上の表）で見る
+
+### 7.1 診断書（`report --html`）
+
+社内でほかの人に渡すための成果物。`latest.json` から作り、照合し直さない。
+
+- 書く場所: `--out <フォルダ>`、無ければ `<data>/reports/`。リポジトリごとに `<名前>.html` と、一覧の `index.html`
+  - `<名前>` は `id` の英数字と `.` `_` `-` 以外を `_` にしたもの（`github.com/example/web-app` → `github.com_example_web-app`）。
+    2 つの `id` が同じ名前になったら、後のものに `-<id の SHA-256 の先頭 8 桁>` を付ける
+  - `--id <id>` ならそのリポジトリの 1 つだけを書き、`index.html` は書き直さない
+  - 全部を書くときは、前に LockWatch が書いた診断書（`<meta name="generator" content="LockWatch ...">` の入った `.html`）のうち、
+    今回書かなかったものを消す（対象から外したリポジトリの古い診断書を残さない）。それ以外のファイルには触れない
+  - 1 つずつ一時ファイルに書いてから入れ替える
+- `--hide` はそのまま効く（消した件数を診断書に書く）。`--json` / `--new` とは一緒に使えない（引数の誤り）
+- 1 ファイルで完結させる: CSS と JS は埋め込み、外部の JS・CSS・フォント・画像は読み込まない。開いても外に通信しない（リンクを押したときだけ osv.dev を開く）
+- 表の絞り込みと並べ替え（埋め込みの JS。JS が動かなくても表はすべて読め、絞り込みの欄は出さない）:
+  - 診断書: 深刻度・知らせの種類ごとに「隠す」、「新規だけ」「直る版があるものだけ」、文字で絞り込み（画面の結果のタブと同じ考え方）
+  - 一覧: 公開の区分ごとに「隠す」、「見つかったものがあるリポジトリだけ」、文字で絞り込み
+  - 見出しを押すとその列で並べ替える（押すたびに昇順・降順。深刻度の列は重さの順、点数と件数の列は数の順）
+  - 表示している件数を「n / 全 m 件」で出す。絞り込んだまま印刷すると、表示している行だけが印刷され、その件数も印刷される（絞り込みの欄は印刷しない）
+- OSV から来た文字列（`summary`・パッケージ名・版など）はすべてエスケープする
+- 中身:
+  1. 見出し: リポジトリの `id`、公開の区分、照合の方法（オンライン = api.osv.dev / 手元の DB）、照合した時刻、osv-scanner の版、
+     手元の DB の取得時刻（手元の DB で照合したときだけ）、診断書を作った時刻と LockWatch の版
+  2. 公開でないリポジトリには「非公開のリポジトリの依存の一覧を含みます。社外に出さないでください」と書く
+  3. 要約: 深刻度ごとの件数、直る版があるものの件数、前回から新しく出たものの件数
+  4. findings の表（重い順）: 深刻度・点数・パッケージ・版・直る版・ID（osv.dev へのリンク）と別名・要約・知らせの種類・lock ファイル・新規の印
+  5. 調べた lock ファイルの一覧
+  6. `no-lockfile` / `error` のときは、その状態と理由だけ
+- 説明文（`details`）は載せない（`latest.json` に無い、§3.3）。詳しくは ID のリンク先で見る
+- 印刷（ブラウザの「PDF に保存」）でそのまま渡せる形にする（深刻度の色を印刷でも残す、表の行を途中で切らない）
 
 ## 8. 設定（`<app>/lockwatch.json`）
 
@@ -277,7 +313,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 
 設定の編集・状態の確認・結果の閲覧を 1 つの窓でできるようにする。RepoTether の設定の「脆弱性」タブの「LockWatch を開く」からも開く。
 
-- tkinter で作る（実行時の依存を足さない）。`pythonw -m lockwatch gui` で開けば黒い窓は出ない
+- tkinter で作る（実行時の依存を足さない）。`scripts\lockwatch-gui.cmd` で開けば黒い窓は出ない（§7 と同じく本体の `pythonw.exe` と `lockwatch-launch.py` を使う）
 - tkinter の落とし穴の対策（グローバルの CLAUDE.md）: タブは選ばれたものがはっきり分かるスタイル、下のボタン行は本体より先に `side=BOTTOM` で置く、絵文字は使わない
 - 照合などの重い仕事は、画面とは別の LockWatch のプロセス（`python -m lockwatch scan` など。同じ `--config` / `--data`）で動かし、
   終わったら状態と結果を読み直す。排他（§7）は CLI のものがそのまま効く（定期実行と重なれば「実行中」と出る）
@@ -289,6 +325,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 | 設定 | §8 の項目を編集して保存する。値は `config set` と同じ規則で検査し、誤りがあれば保存しない。`online_public` には、切ると何も外に送らないことを書き添える。保存は `config.save`（一時ファイルから入れ替え） |
 
 - 画面を開いているあいだに定期実行が結果を書いても、自動では読み直さない（「読み直す」ボタン）
+- 結果のタブの「診断書を出す」: `report --html` を別のプロセスで動かし（「隠す」で選んだものは `--hide` で渡す）、終わったら `index.html` を開く
 
 ## 10. 決めていないこと
 

@@ -2,6 +2,23 @@
 
 <!-- 見出しは `## <版番号>` の形にする。まだ出していない変更は「## 未公開」に書き、リリースのときに版番号へ書き換える -->
 
+## 未公開
+
+- `lockwatch report --html`: リポジトリごとの診断書（HTML）と一覧（`index.html`）を `data\reports\` に書く（`--out` で場所を変えられる）。
+  社内で渡すためのもの。1 ファイルで完結し、開いても外に通信しない。公開でないリポジトリには「社外に出さないでください」と書く。
+  ブラウザの「PDF に保存」でそのまま印刷できる。`--hide` で除いたものは件数を書き添える
+  - 診断書と一覧の表は、ブラウザで絞り込める（深刻度・知らせの種類・公開の区分を隠す、新規だけ、直る版があるものだけ、文字）。
+    見出しを押すとその列で並べ替える。絞り込んだまま印刷すると、表示している行だけが印刷される
+  - 画面の「結果」タブの「診断書を出す」からも作れる（「隠す」の選択を引き継ぎ、終わったら一覧を開く）
+- `scripts\lockwatch-gui.cmd`: 画面を開く（ダブルクリックで開ける）
+- 定期実行で黒い窓が開いていたのを直す。uv 0.11 の `.venv\Scripts\pythonw.exe` はコンソール用だったため、
+  本体の Python の `pythonw.exe` で `scripts\lockwatch-launch.py` を動かすようにした。**`scripts\register-task.ps1` で登録し直す**
+- `scripts\register-task.ps1` が Windows PowerShell 5.1（`powershell`）で構文エラーになっていたのを直す（日本語を含む BOM の無い UTF-8 を cp932 として読まれていた）。
+  スクリプトは英語だけにした（表示も英語になる）。使い方の例を `pwsh` から `powershell -NoProfile -ExecutionPolicy Bypass -File` に変えた（`pwsh` は入っていない環境がある）
+- `lockwatch report --id <id>`: そのリポジトリだけを表示する
+- 結果（`latest.json`）のリポジトリごとに `visibility`（公開の区分）を書く
+- 直したこと: `report --hide` の「〜件を消しています」が、前回から新しく出たものを 2 回数えていた
+
 ## 0.2.0
 
 - 画面（`lockwatch gui`）を足す。`.venv\Scripts\pythonw.exe -m lockwatch gui` で開く（黒い窓は出ない）

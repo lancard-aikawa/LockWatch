@@ -188,8 +188,9 @@ class App:
             pass
         self._after = self.root.after(100, self._poll)
 
-    def run_command(self, label: str, argv: list[str]) -> None:
-        """LockWatch のコマンドを別のプロセスで動かし、出力を状態のタブの下に出す。終わったら読み直す"""
+    def run_command(self, label: str, argv: list[str], then=None) -> None:
+        """LockWatch のコマンドを別のプロセスで動かし、出力を状態のタブの下に出す。終わったら読み直す。
+        then があれば、終了コード 0 のときに呼ぶ"""
         if self.running:
             self.message.config(text="ほかの仕事が終わるまで待ってください")
             return
@@ -216,6 +217,8 @@ class App:
             note = {0: "終わりました", 3: "ほかの LockWatch が実行中です", 4: "osv-scanner が失敗しました"}.get(code, "失敗しました")
             self.message.config(text=f"{label}: {note}")
             self.reload()
+            if then is not None and code == 0:
+                then()
 
         self._run_in_background(f"{label}…", work, done)
 
@@ -309,8 +312,13 @@ class App:
         ttk.Label(filters, text="絞り込み").pack(side=tk.RIGHT, padx=(0, 4))
 
         # 件数の行を、表より先に下に置く
-        self.result_count = ttk.Label(tab, text="")
-        self.result_count.pack(side=tk.BOTTOM, anchor=tk.W, pady=(6, 0))
+        foot = ttk.Frame(tab)
+        foot.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+        self.report_button = ttk.Button(foot, text="診断書を出す", command=self.write_reports)
+        self.report_button.pack(side=tk.RIGHT)
+        self.buttons.append(self.report_button)
+        self.result_count = ttk.Label(foot, text="")
+        self.result_count.pack(side=tk.LEFT, anchor=tk.W)
 
         table = ttk.Frame(tab)
         table.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(8, 0))
@@ -339,6 +347,17 @@ class App:
             total = sum(len((e or {}).get("findings") or []) for e in self.latest.get("repos", {}).values())
             self.result_count.config(
                 text=f"{len(rows)} 件を表示 (全体 {total} 件)。照合 {self.latest.get('scanned_at')}。行をダブルクリックすると osv.dev で詳しく見られます")
+
+    def report_argv(self) -> list[str]:
+        """診断書を書くコマンド。「隠す」で選んだものは --hide で渡す"""
+        argv = self.lockwatch("report", "--html")
+        for key in sorted(k for k, v in self.hide_vars.items() if v.get()):
+            argv += ["--hide", key]
+        return argv
+
+    def write_reports(self) -> None:
+        index = self.data / "reports" / "index.html"
+        self.run_command("診断書を出す", self.report_argv(), then=lambda: os.startfile(index))  # noqa: S606
 
     def open_vulnerability(self, _event=None) -> None:
         sel = self.tree.selection()

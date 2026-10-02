@@ -96,6 +96,13 @@ class AppTest(unittest.TestCase):
         self.app.show_results()
         self.assertEqual(len(self.app.tree.get_children()), 2)
 
+    def test_report_argv_passes_hide(self):
+        self.app.hide_vars["unmaintained"].set(True)
+        self.app.hide_vars["low"].set(True)
+        argv = self.app.report_argv()
+        self.assertEqual(argv[argv.index("report"):], ["report", "--html", "--hide", "low", "--hide", "unmaintained"])
+        self.assertIn(self.app.report_button, self.app.buttons)  # 仕事の最中は押せない
+
     def test_save_settings(self):
         self.app.fields["online_public"].set(False)
         self.app.fields["parallel"].set("8")

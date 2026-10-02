@@ -1,10 +1,17 @@
-# タスクスケジューラに「LockWatch scan」を登録する（docs/design.md §7）
-#   pwsh -File scripts\register-task.ps1                  毎日 9:00（逃した回は次に起動したとき）
-#   pwsh -File scripts\register-task.ps1 -At 13:30
-#   pwsh -File scripts\register-task.ps1 -Data D:\lw      データの場所を渡す（既定は設定の data_dir）
-#   pwsh -File scripts\register-task.ps1 -Unregister      消す
-# リポジトリの .venv の pythonw.exe で動かすので、コンソールの窓は開かない。結果は <data>/last-run.log と、
-# タスクの「前回の実行結果」（0 = 終わった、1 = LockWatch の誤り、2 = targets.json が無いなど、3 = 実行中、4 = osv-scanner が失敗）で見る。
+# Register the "LockWatch scan" task in Task Scheduler (docs/design.md section 7).
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1                 daily at 9:00 (a missed run starts at next logon)
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1 -At 13:30
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1 -Data D:\lw     data folder (default: data_dir in the config)
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1 -Unregister     remove the task
+#
+# Keep this file ASCII only. Windows PowerShell 5.1 reads a file without BOM as the ANSI code page
+# (cp932 on Japanese Windows), so non-ASCII text breaks the parser. pwsh (7) is not always installed.
+#
+# The task runs scripts\lockwatch-launch.py with the base interpreter's pythonw.exe (the "home" in
+# .venv\pyvenv.cfg), so no console window opens. (.venv\Scripts\pythonw.exe made by uv 0.11 is a
+# console launcher and opens one.) Check the result in <data>\last-run.log and the task's
+# "Last Run Result": 0 = done, 1 = LockWatch bug, 2 = usage (e.g. no targets.json), 3 = already running,
+# 4 = osv-scanner failed.
 param(
     [string]$At = "09:00",
     [string]$Data = "",
@@ -15,32 +22,38 @@ $ErrorActionPreference = "Stop"
 
 if ($Unregister) {
     Unregister-ScheduledTask -TaskName $Name -Confirm:$false
-    Write-Host "消しました: $Name"
+    Write-Host "Removed: $Name"
     return
 }
 
 $repo = Split-Path -Parent $PSScriptRoot
-$pythonw = Join-Path $repo ".venv\Scripts\pythonw.exe"
-if (-not (Test-Path $pythonw)) {
-    throw "$pythonw がありません。先にリポジトリで uv sync を実行してください"
+$cfg = Join-Path $repo ".venv\pyvenv.cfg"
+if (-not (Test-Path $cfg)) {
+    throw "$cfg not found. Run 'uv sync' in the repository first."
 }
+$homeLine = Get-Content $cfg -Encoding utf8 | Where-Object { $_ -match '^\s*home\s*=' } | Select-Object -First 1
+$pythonw = if ($homeLine) { Join-Path ($homeLine -replace '^\s*home\s*=\s*', '').Trim() "pythonw.exe" } else { "" }
+if (-not $pythonw -or -not (Test-Path $pythonw)) {
+    throw "pythonw.exe of the base Python not found (the 'home' in $cfg)."
+}
+$launcher = Join-Path $repo "scripts\lockwatch-launch.py"
 if (-not (Get-Command osv-scanner -ErrorAction SilentlyContinue)) {
-    Write-Warning "osv-scanner が PATH にありません（設定 osv_scanner で場所を指定していれば問題ありません）"
+    Write-Warning "osv-scanner is not on PATH (fine if osv_scanner is set in the config)."
 }
 
-$arguments = "-m lockwatch --log"
+$arguments = "`"$launcher`" --log"
 if ($Data) { $arguments += " --data `"$Data`"" }
 $arguments += " scan"
 
 $action = New-ScheduledTaskAction -Execute $pythonw -Argument $arguments -WorkingDirectory $repo
 $daily = New-ScheduledTaskTrigger -Daily -At $At
-# 優先度 7 = 通常より低い。逃した回は次に起動したときに動かす。ネットが無いときは動かさない
+# Priority 7 = below normal. Run a missed start when available. Skip when there is no network.
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -RunOnlyIfNetworkAvailable `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Priority 7 -ExecutionTimeLimit (New-TimeSpan -Hours 1)
-# ログオンしているときだけ動かす（パスワードを預けない）
+# Run only while the user is logged on (no stored password).
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $Name -Action $action -Trigger $daily -Settings $settings `
-    -Principal $principal -Description "lock ファイルを osv-scanner にかけ、脆弱性の一覧を書く（$repo）" -Force | Out-Null
-Write-Host "登録しました: $Name（毎日 $At）"
+    -Principal $principal -Description "Scan lock files with osv-scanner and write the vulnerability list ($repo)" -Force | Out-Null
+Write-Host "Registered: $Name (daily at $At)"
 Write-Host "  $pythonw $arguments"

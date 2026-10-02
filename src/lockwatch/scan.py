@@ -63,7 +63,7 @@ def _prepare(t: Target, mode: str) -> Job:
 
 def _entry(job: Job, at: datetime | str, status: str, findings: list[dict], error: str | None = None) -> dict:
     """at はキャッシュから返すときは保存した時刻（照合した時刻）"""
-    e = {"status": status, "mode": job.mode, "scanned_at": at if isinstance(at, str) else store.iso(at), "lockfiles": job.lockfiles, "findings": findings}
+    e = {"status": status, "visibility": job.target.visibility, "mode": job.mode, "scanned_at": at if isinstance(at, str) else store.iso(at), "lockfiles": job.lockfiles, "findings": findings}
     if error:
         e["error"] = error
     return e

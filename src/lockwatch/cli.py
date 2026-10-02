@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import __version__
 from . import config as cfgmod
-from . import fold, osv, store
+from . import fold, htmlreport, osv, store
 from . import scan as scanmod
 from . import status as statusmod
 from . import targets as targetsmod
@@ -42,6 +42,9 @@ def _build_parser() -> argparse.ArgumentParser:
     r.add_argument("--json", action="store_true", help="JSON で出す")
     r.add_argument("--hide", action="append", default=[], choices=[*fold.SEVERITIES, *fold.INFORMATIONAL],
                    help="この深刻度か知らせの種類を消す（重ねて書ける）")
+    r.add_argument("--id", help="このリポジトリだけ")
+    r.add_argument("--html", action="store_true", help="リポジトリごとの診断書（HTML）と一覧（index.html）を書く")
+    r.add_argument("--out", help="診断書を書くフォルダ（既定: <data>/reports）")
 
     sub.add_parser("db-update", help="脆弱性 DB を取り直す")
 
@@ -228,16 +231,31 @@ def _cmd_report(args, cfg: dict) -> int:
     if latest is None:
         print(f"結果がまだありません: {store.results_dir(data) / 'latest.json'}（先に scan）", file=sys.stderr)
         return EXIT_USAGE
+    if args.html and (args.json or args.new):
+        print("--html は --json / --new と一緒に使えません", file=sys.stderr)
+        return EXIT_USAGE
+    if args.out and not args.html:
+        print("--out は --html と一緒に使います", file=sys.stderr)
+        return EXIT_USAGE
+    if args.id and args.id not in latest["repos"]:
+        print(f"結果にありません: {args.id}", file=sys.stderr)
+        return EXIT_USAGE
     hide = set(args.hide)
-    new = [n for n in latest.get("new") or [] if not fold.hidden(n, hide)]
-    n_hidden = len(latest.get("new") or []) - len(new)
+    all_new = [n for n in latest.get("new") or [] if not args.id or n.get("repo") == args.id]
+    new = [n for n in all_new if not fold.hidden(n, hide)]
+    # 消した件数。new の項目は findings にも入っているので、--new のときだけ new の側で数える（両方で数えると 2 回になる）
+    n_hidden = len(all_new) - len(new) if args.new else 0
     repos = {}
     for rid, e in latest["repos"].items():
+        if args.id and rid != args.id:
+            continue
         kept = [f for f in e.get("findings") or [] if not fold.hidden(f, hide)]
         if not args.new:
             n_hidden += len(e.get("findings") or []) - len(kept)
         repos[rid] = {**e, "findings": kept}
 
+    if args.html:
+        return _write_html(args, cfg, data, latest, repos, new, n_hidden, hide)
     if args.json:
         obj = new if args.new else {**latest, "repos": repos, "new": new}
         print(json.dumps(obj, ensure_ascii=False, indent=2))
@@ -254,6 +272,34 @@ def _cmd_report(args, cfg: dict) -> int:
         print(f"新しく出たもの: {len(new)} 件")
     if hide:
         print(f"（--hide {' '.join(sorted(hide))} で {n_hidden} 件を消しています）")
+    return EXIT_OK
+
+
+def _write_html(args, cfg: dict, data: Path, latest: dict, repos: dict, new: list[dict], n_hidden: int, hide: set[str]) -> int:
+    """診断書を書く（design.md §7.1）。--id ならそのリポジトリだけで、index.html は書き直さない"""
+    out_dir = Path(args.out).expanduser() if args.out else data / "reports"
+    made_at = store.now()
+    names = htmlreport.file_names(latest["repos"])  # --id のときも、全部を書いたときと同じ名前にする
+    written = []
+    for rid, e in repos.items():
+        n_h = len(latest["repos"][rid].get("findings") or []) - len(e["findings"])
+        new_ids = {(n.get("package"), n.get("id")) for n in new if n.get("repo") == rid}
+        path = out_dir / f"{names[rid]}.html"
+        htmlreport.write_text(path, htmlreport.render_repo(rid, e, latest, new_ids=new_ids, n_hidden=n_h, hide=hide, made_at=made_at))
+        written.append(path)
+    if not args.id:
+        index = out_dir / "index.html"
+        htmlreport.write_text(index, htmlreport.render_index(repos, latest, names, n_new=len(new), n_hidden=n_hidden, hide=hide, made_at=made_at))
+        written.append(index)
+        # 対象から外したリポジトリの古い診断書を消す。LockWatch が書いたもの以外には触れない
+        keep = {p.name.lower() for p in written}
+        for old in out_dir.glob("*.html"):
+            if old.name.lower() not in keep and htmlreport.is_ours(old):
+                old.unlink()
+                print(f"古い診断書を消しました: {old}")
+    print(f"{len(repos)} 件の診断書を書きました: {written[-1]}")
+    if hide:
+        print(f"（--hide {' '.join(sorted(hide))} で {n_hidden} 件を除いています）")
     return EXIT_OK
 
 
