@@ -334,3 +334,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 - 所属する組織のリポジトリを対象に入れるか（入れても private なのでオフライン）
 - 新しく出たものの知らせ方（RepoTether の表示だけか、Windows の通知も出すか）
 - Gogs で木の一覧を再帰的に取れるか（RepoTether 側の話）
+- **保留（2026-10-03）**: Flutter の Android 側（Gradle の依存）を照合するか。osv-scanner は `gradle.lockfile`（Maven）を読めて、検出も確かめた。
+  ただし Flutter の雛形は依存を固定しないので、各プロジェクトで `gradle.lockfile` を作って git に入れるか、LockWatch が Gradle を動かして作る必要がある
+  （1 つ 1〜4 分、オフラインでは作れず Google・Maven Central への通信が要る）。今の手元のプロジェクトでは見つかるものが無く、効果が限られるので見送った。
+  再開するなら、まず `lockfiles.NAMES` に `gradle.lockfile` を足して生態系を Maven にする（読むだけ）。Pub（`pubspec.lock`）は照合しているが、OSV の勧告は 13 件しかない
