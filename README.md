@@ -27,6 +27,8 @@
    uv sync
    ```
 
+   画面（`scripts\lockwatch-gui.cmd`）と定期実行（`scripts\register-task.ps1`）だけなら、`uv sync` をしていなくても動く（Python 3.10 以上と tkinter があればよい）。
+
 3. 動くかを確かめる
 
    ```cmd
@@ -47,7 +49,7 @@ scripts\lockwatch-gui.cmd    :: 状態・結果・設定の画面（ダブルク
 ```
 
 uv 0.11 が作る `.venv\Scripts\pythonw.exe` はコンソール用の `python.exe` と同じもので、そこから開くと黒い窓も開く。
-`lockwatch-gui.cmd` は `.venv\pyvenv.cfg` の `home` にある本体の `pythonw.exe` で `scripts\lockwatch-launch.py` を動かす（`src` を読み込み先に足す。実行時の依存が無いので `.venv` は要らない）。
+`lockwatch-gui.cmd` は本体の Python の `pythonw.exe` で `scripts\lockwatch-launch.py` を動かす（`src` を読み込み先に足す）。`scripts\find-pythonw.ps1` が Python 3.10 以上を探す（`.venv` の `home`、`uv python find`、`py`、PATH の `python` の順。venv の中のものは本体に置き換える）。実行時の依存が無いので `.venv` は要らない。
 
 - **状態**: LockWatch・osv-scanner の版、受け渡し、最後の照合、手元の DB、定期実行。全体の照合・DB の取り直し・定期実行の登録 / 解除もここから
 - **結果**: 脆弱性の一覧（重い順）。深刻度や「保守終了」などで隠せる。行をダブルクリックすると osv.dev が開く。「診断書を出す」でリポジトリごとの診断書（HTML）を書いて一覧を開く
@@ -76,7 +78,7 @@ uv run lockwatch config show
 
 ## 定期実行
 
-タスクスケジューラに毎日 1 回の scan を登録する。本体の Python の `pythonw.exe` と `scripts\lockwatch-launch.py` で動くので窓は開かない。
+タスクスケジューラに毎日 1 回の scan を登録する。本体の Python の `pythonw.exe` と `scripts\lockwatch-launch.py` で動くので窓は開かない。`scripts\find-pythonw.ps1` が Python 3.10 以上を探す（`.venv` の `home`、`uv python find`、`py`、PATH の `python` の順。venv の中のものは本体に置き換える）。実行時の依存が無いので `.venv` は要らない。
 優先度は「通常より低い」。PC が止まっていて逃した回は、次に起動したときに動く。
 
 ```cmd

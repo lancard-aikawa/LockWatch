@@ -7,9 +7,9 @@
 # Keep this file ASCII only. Windows PowerShell 5.1 reads a file without BOM as the ANSI code page
 # (cp932 on Japanese Windows), so non-ASCII text breaks the parser. pwsh (7) is not always installed.
 #
-# The task runs scripts\lockwatch-launch.py with the base interpreter's pythonw.exe (the "home" in
-# .venv\pyvenv.cfg), so no console window opens. (.venv\Scripts\pythonw.exe made by uv 0.11 is a
-# console launcher and opens one.) Check the result in <data>\last-run.log and the task's
+# The task runs scripts\lockwatch-launch.py with a base interpreter's pythonw.exe found by
+# scripts\find-pythonw.ps1 (Python 3.10 or later; no .venv needed), so no console window opens.
+# (.venv\Scripts\pythonw.exe made by uv 0.11 is a console launcher and opens one.) Check the result in <data>\last-run.log and the task's
 # "Last Run Result": 0 = done, 1 = LockWatch bug, 2 = usage (e.g. no targets.json), 3 = already running,
 # 4 = osv-scanner failed.
 param(
@@ -27,14 +27,10 @@ if ($Unregister) {
 }
 
 $repo = Split-Path -Parent $PSScriptRoot
-$cfg = Join-Path $repo ".venv\pyvenv.cfg"
-if (-not (Test-Path $cfg)) {
-    throw "$cfg not found. Run 'uv sync' in the repository first."
-}
-$homeLine = Get-Content $cfg -Encoding utf8 | Where-Object { $_ -match '^\s*home\s*=' } | Select-Object -First 1
-$pythonw = if ($homeLine) { Join-Path ($homeLine -replace '^\s*home\s*=\s*', '').Trim() "pythonw.exe" } else { "" }
-if (-not $pythonw -or -not (Test-Path $pythonw)) {
-    throw "pythonw.exe of the base Python not found (the 'home' in $cfg)."
+# A base interpreter's pythonw.exe (no .venv needed). find-pythonw.ps1 prints the reason when none is found.
+$pythonw = & (Join-Path $PSScriptRoot "find-pythonw.ps1")
+if ($LASTEXITCODE -ne 0 -or -not $pythonw) {
+    throw "No Python to run the task (see the message above)."
 }
 $launcher = Join-Path $repo "scripts\lockwatch-launch.py"
 if (-not (Get-Command osv-scanner -ErrorAction SilentlyContinue)) {

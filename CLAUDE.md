@@ -18,4 +18,4 @@
   日本語が化けて構文エラーになる（2026-10-02、別環境で register-task.ps1 が失敗）。`pwsh` は入っていない環境があるので、
   使い方は `powershell -NoProfile -ExecutionPolicy Bypass -File ...` で書き、5.1 で動くものにする。`.cmd` と合わせて `tests/test_scripts.py` が検査する
 - **`.venv\Scripts\pythonw.exe` では窓が消えない。**uv 0.11 の venv では `python.exe` と同じコンソール用の起動役で、黒い窓（Windows Terminal のタブ）が開く
-  （2026-10-02 確認。PE の subsystem が console）。窓を出さずに動かすときは `.venv\pyvenv.cfg` の `home` の `pythonw.exe` で `scripts/lockwatch-launch.py` を動かす（`lockwatch-gui.cmd`・`register-task.ps1`）
+  （2026-10-02 確認。PE の subsystem が console）。窓を出さずに動かすときは、`scripts/find-pythonw.ps1` が探す本体の `pythonw.exe` で `scripts/lockwatch-launch.py` を動かす（`lockwatch-gui.cmd`・`register-task.ps1`）。**`.venv` があることを前提にしない**（使う側の PC には無いことがある。2026-10-02 に別環境で失敗）

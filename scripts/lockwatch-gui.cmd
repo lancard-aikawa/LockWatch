@@ -1,22 +1,17 @@
 @echo off
 rem Open the LockWatch window (status, results, settings, reports).
 rem
-rem .venv\Scripts\pythonw.exe made by uv 0.11 is a console launcher (same file as
-rem python.exe), so it opens a console window. Run the base interpreter's
-rem pythonw.exe (the "home" in .venv\pyvenv.cfg) with lockwatch-launch.py instead.
+rem Runs scripts\lockwatch-launch.py with a base interpreter's pythonw.exe found by
+rem find-pythonw.ps1 (no .venv needed; .venv\Scripts\pythonw.exe made by uv 0.11 is a
+rem console launcher and opens a console window).
 setlocal
-set "ROOT=%~dp0.."
-set "CFG=%ROOT%\.venv\pyvenv.cfg"
-if not exist "%CFG%" goto nopython
-set "HOMEDIR="
-for /f "usebackq tokens=1,* delims== " %%a in ("%CFG%") do if /i "%%a"=="home" set "HOMEDIR=%%b"
-if not defined HOMEDIR goto nopython
-if not exist "%HOMEDIR%\pythonw.exe" goto nopython
-start "" "%HOMEDIR%\pythonw.exe" "%~dp0lockwatch-launch.py" gui %*
+set "PYW="
+for /f "usebackq delims=" %%p in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0find-pythonw.ps1" -Tk`) do set "PYW=%%p"
+if not defined PYW (
+  echo Python 3.10 or later with tkinter was not found.
+  echo Install it from https://www.python.org/ and run this again.
+  pause
+  exit /b 1
+)
+start "" "%PYW%" "%~dp0lockwatch-launch.py" gui %*
 exit /b 0
-
-:nopython
-echo Python for LockWatch not found (%CFG%).
-echo Run "uv sync" in the repository folder first.
-pause
-exit /b 1

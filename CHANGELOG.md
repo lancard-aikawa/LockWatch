@@ -13,6 +13,7 @@
 - `scripts\lockwatch-gui.cmd`: 画面を開く（ダブルクリックで開ける）
 - 定期実行で黒い窓が開いていたのを直す。uv 0.11 の `.venv\Scripts\pythonw.exe` はコンソール用だったため、
   本体の Python の `pythonw.exe` で `scripts\lockwatch-launch.py` を動かすようにした。**`scripts\register-task.ps1` で登録し直す**
+- `scripts\register-task.ps1` と `scripts\lockwatch-gui.cmd` が `.venv` の無い環境で止まっていたのを直す。`scripts\find-pythonw.ps1` が Python 3.10 以上を探す（`.venv`、`uv python find`、`py`、PATH の `python` の順）
 - `scripts\register-task.ps1` が Windows PowerShell 5.1（`powershell`）で構文エラーになっていたのを直す（日本語を含む BOM の無い UTF-8 を cp932 として読まれていた）。
   スクリプトは英語だけにした（表示も英語になる）。使い方の例を `pwsh` から `powershell -NoProfile -ExecutionPolicy Bypass -File` に変えた（`pwsh` は入っていない環境がある）
 - `lockwatch report --id <id>`: そのリポジトリだけを表示する

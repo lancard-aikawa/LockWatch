@@ -250,7 +250,7 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 - 終了コード: 0 = 終わった（脆弱性の有無は問わない）、1 = 想定外の失敗（LockWatch の誤り。`--log` なら例外の内容を書く）、2 = 引数の誤り、3 = 実行中、4 = osv-scanner が無い・失敗した
   （1 回でも失敗したら 4。結果はそれでも書き、失敗したリポジトリは `error` にする。フォルダが無いだけの `error` は 0）
 - 定期実行はタスクスケジューラで 1 日 1 回（`scripts/register-task.ps1`。SessionVault と同じ作り）
-  - `<home>\pythonw.exe scripts\lockwatch-launch.py --log scan` を、既定で毎日 9:00 に（`<home>` は `.venv\pyvenv.cfg` の `home`。
+  - `<home>\pythonw.exe scripts\lockwatch-launch.py --log scan` を、既定で毎日 9:00 に（`<home>\pythonw.exe` は `scripts\find-pythonw.ps1` が探す Python 3.10 以上の本体の `pythonw.exe`。順に `.venv\pyvenv.cfg` の `home`、`uv python find`、`py`、PATH の `python`。venv の中のものは `sys.base_prefix` の本体に置き換える。`.venv` が無くても動く。
     uv 0.11 の `.venv\Scripts\pythonw.exe` はコンソール用で黒い窓が開くため、使わない。`lockwatch-launch.py` が `src` を読み込み先に足す）。止まっていて逃した回は、次に起動したときに動かす
   - 窓を出さない（`pythonw`、osv-scanner は `CREATE_NO_WINDOW`）。優先度は 7（通常より低い。子の osv-scanner も引き継ぐ）
   - ログオンしているときだけ動かす（パスワードを預けない）。ネットにつながっていないときは動かさない（公開のものの照合が失敗するため）

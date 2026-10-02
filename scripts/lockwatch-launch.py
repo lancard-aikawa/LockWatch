@@ -1,7 +1,7 @@
 """窓を出さずに LockWatch を動かすための起動役（scripts/lockwatch-gui.cmd と register-task.ps1 が使う）
 
 uv 0.11 の .venv\\Scripts\\pythonw.exe は python.exe と同じコンソール用の起動役で、黒い窓が開く。
-そこで本体の Python の pythonw.exe（.venv\\pyvenv.cfg の home）でこのファイルを動かす。
+そこで本体の Python の pythonw.exe（scripts\\find-pythonw.ps1 が探す）でこのファイルを動かす。
 LockWatch は標準ライブラリしか使わないので、src を読み込み先に足せば .venv は要らない。
 
   <home>\\pythonw.exe scripts\\lockwatch-launch.py gui
