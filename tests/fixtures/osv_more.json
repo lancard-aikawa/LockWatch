@@ -1,0 +1,22 @@
+{
+  "results": [
+    {
+      "source": {"path": "@/pub/pnpm-lock.yaml", "type": "lockfile"},
+      "packages": [
+        {
+          "package": {"name": "vite", "version": "6.0.1", "ecosystem": "npm"},
+          "groups": [{"ids": ["GHSA-aaaa-aaaa-aaaa"], "aliases": ["CVE-2026-0001", "GHSA-aaaa-aaaa-aaaa"], "max_severity": "7.5"},
+                     {"ids": ["GHSA-cccc-cccc-cccc"], "aliases": ["GHSA-cccc-cccc-cccc"], "max_severity": "5.3"}],
+          "vulnerabilities": [
+            {"id": "GHSA-aaaa-aaaa-aaaa", "summary": "vite serves files outside the root",
+             "affected": [{"package": {"ecosystem": "npm", "name": "vite"},
+              "ranges": [{"type": "SEMVER", "events": [{"introduced": "6.0.0"}, {"fixed": "6.0.9"}]}]}]},
+            {"id": "GHSA-cccc-cccc-cccc", "summary": "vite newly reported issue",
+             "affected": [{"package": {"ecosystem": "npm", "name": "vite"},
+              "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "6.1.0"}]}]}]}
+          ]
+        }
+      ]
+    }
+  ]
+}

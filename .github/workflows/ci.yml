@@ -1,0 +1,26 @@
+name: ci
+
+# main への push と pull request でテストを流す。実行時の依存は無いので、Python だけで足りる
+# (テストは osv-scanner もネットも使わない)
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest discover -s tests -v
+        env:
+          PYTHONPATH: src

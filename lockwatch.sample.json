@@ -1,0 +1,10 @@
+{
+  "data_dir": null,
+  "targets": null,
+  "osv_scanner": null,
+  "online_public": true,
+  "parallel": 4,
+  "db_max_age_days": 7,
+  "cache_max_age_hours": 20,
+  "keep_results": 30
+}

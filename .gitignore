@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+
+# 手元の設定と、既定のデータ（結果には自分のリポジトリの弱点が並ぶ）
+/lockwatch.json
+/data/
