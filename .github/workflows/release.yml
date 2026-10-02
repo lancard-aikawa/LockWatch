@@ -1,0 +1,57 @@
+name: release
+
+# タグを打つ = リリース。v<版> のタグを push すると、版の一致 (タグ・pyproject.toml・__init__.py) と
+# CHANGELOG.md のその版の節を検査し、テストを通してから Release をそのまま公開する (下書きにしない)。
+#   git tag v0.3.0 && git push origin v0.3.0
+# 配るファイルはソースコードだけ (GitHub が自動で付ける zip / tar.gz)。
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: 版と CHANGELOG を検査し、本文を作る
+        run: |
+          python .github/release_notes.py '${{ github.ref_name }}' dist/release-body.md
+          if ($LASTEXITCODE -ne 0) { throw "版か CHANGELOG が合っていません" }
+
+      - name: テスト
+        run: |
+          python -m unittest discover -s tests
+          if ($LASTEXITCODE -ne 0) { throw "テストが失敗しました" }
+        env:
+          PYTHONPATH: src
+
+      # タグのページの「Release を作る」から先に空の Release ができていたら、新しく作らずにそこへ題と本文を入れる
+      - name: Release を作って公開する
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $title = 'LockWatch ' + ($tag -replace '^v', '')
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "$tag の Release は既にあるので、題と本文を入れて公開します"
+            gh release edit $tag --title $title --notes-file dist/release-body.md --draft=false --latest
+            if ($LASTEXITCODE -ne 0) { throw "Release を直せません" }
+          } else {
+            gh release create $tag --title $title --notes-file dist/release-body.md --latest
+            if ($LASTEXITCODE -ne 0) { throw "Release を作れません" }
+          }

@@ -92,6 +92,14 @@ uv run python -m unittest discover -s tests
 
 テストは osv-scanner もネットも使わない（osv-scanner の JSON は `tests/fixtures/` に小さく作ってある）。
 
+### リリース
+
+`pyproject.toml` と `src/lockwatch/__init__.py` の版を上げ（`uv lock` で `uv.lock` も）、`CHANGELOG.md` にその版の節を書いてから、
+`v<版>` のタグを push する。GitHub Actions が版の一致と CHANGELOG の節を検査し、テストを通してから、
+その節と「入れ方・更新の仕方」（`.github/release-intro.md`）を本文にした Release をそのまま公開する（下書きにはしない）。
+GitHub のタグのページから Release を作る操作は要らない（作ってしまっても、Actions がそこへ題と本文を入れる）。
+本文は `python .github/release_notes.py v<版> dist/release-body.md` で手元でも作れる。
+
 ## ライセンス
 
 MIT
