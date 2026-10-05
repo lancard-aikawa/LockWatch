@@ -1,4 +1,5 @@
 """lock ファイルの名前と数え方（docs/design.md §5.2）。RepoTether が取ってくるファイルもこの表に合わせる"""
+import fnmatch
 import os
 import subprocess
 from pathlib import Path
@@ -30,6 +31,18 @@ def is_lockfile(name: str) -> bool:
 def ecosystem_of(name: str) -> str:
     """lock ファイルの名前（パスの最後）から生態系を決める"""
     return ECOSYSTEMS.get(name, "PyPI")  # 表に無いのは requirements*.txt だけ
+
+
+def split_excluded(found: list[str], exclude_dirs) -> tuple[list[str], list[str]]:
+    """(対象にするもの, 外すもの)。相対パスのフォルダ名のどれかが exclude_dirs のどれかと同じなら外す
+    （大文字小文字は区別しない。* ? を書ける。ファイル名は見ない）。design.md §5.2"""
+    patterns = [p.lower() for p in exclude_dirs or [] if isinstance(p, str) and p]
+    kept, excluded = [], []
+    for rel in found:
+        dirs = rel.lower().split("/")[:-1]
+        hit = any(fnmatch.fnmatchcase(d, p) for d in dirs for p in patterns)
+        (excluded if hit else kept).append(rel)
+    return kept, excluded
 
 
 def _git_ls_files(root: Path) -> list[str] | None:

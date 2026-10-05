@@ -20,6 +20,7 @@ class Job:
     mode: str                                  # online / offline
     root: Path                                 # 絶対パス
     lockfiles: list[str] = field(default_factory=list)   # root からの相対、/ 区切り
+    excluded: list[str] = field(default_factory=list)    # 設定 exclude_dirs で対象から外した lock ファイル
     hashes: list[str] = field(default_factory=list)
     error: str | None = None
 
@@ -48,14 +49,15 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _prepare(t: Target, mode: str) -> Job:
+def _prepare(t: Target, mode: str, exclude_dirs=()) -> Job:
     root = Path(os.path.abspath(t.root))
     job = Job(t, mode, root)
     if not root.is_dir():
         job.error = f"フォルダがありません: {root}"
         return job
     try:
-        job.lockfiles = lockfiles.find(root, use_git=not t.fetched)
+        # ほかの人のコードを取り込んだフォルダの中は対象から外す（design.md §5.2）
+        job.lockfiles, job.excluded = lockfiles.split_excluded(lockfiles.find(root, use_git=not t.fetched), exclude_dirs)
         job.hashes = [_sha256(p) for p in job.paths()]
     except OSError as e:
         job.error = f"lock ファイルを読めません: {e}"
@@ -64,7 +66,7 @@ def _prepare(t: Target, mode: str) -> Job:
 
 def _entry(job: Job, at: datetime | str, status: str, findings: list[dict], error: str | None = None) -> dict:
     """at はキャッシュから返すときは保存した時刻（照合した時刻）"""
-    e = {"status": status, "visibility": job.target.visibility, "mode": job.mode, "scanned_at": at if isinstance(at, str) else store.iso(at), "lockfiles": job.lockfiles, "findings": findings, "notices": []}
+    e = {"status": status, "visibility": job.target.visibility, "mode": job.mode, "scanned_at": at if isinstance(at, str) else store.iso(at), "lockfiles": job.lockfiles, "excluded": job.excluded, "findings": findings, "notices": []}
     if error:
         e["error"] = error
     return e
@@ -96,7 +98,7 @@ def _assign(jobs: list[Job], data: dict) -> tuple[dict[str, list[dict]], dict[st
 def _jobs(targets: list[Target], cfg: dict) -> list[Job]:
     online, _ = split_by_privacy(targets, cfg["online_public"])
     online_ids = {t.id for t in online}
-    return [_prepare(t, "online" if t.id in online_ids else "offline") for t in targets]
+    return [_prepare(t, "online" if t.id in online_ids else "offline", cfg.get("exclude_dirs")) for t in targets]
 
 
 def _key(job: Job, scanner_version: str, db_state: dict[str, str]) -> str:

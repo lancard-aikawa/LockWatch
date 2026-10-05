@@ -138,6 +138,7 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 - `status`: `ok` / `no-lockfile`（lock ファイルが無い、または osv-scanner の終了コード 128）/ `error`（理由の文を `error` に入れる。RepoTether はそれを出す）
 - `visibility`: `targets.json` の値（`--repo` なら `unknown`）。`mode` だけでは、`online_public: false` のときに公開か非公開かが分からないため（診断書の見出しに使う、§7.1）。
   0.2.0 までの `latest.json` には無い。無ければ `mode` が `online` なら `public`、それ以外は分からないとして扱う
+- `excluded`: 設定 `exclude_dirs` で対象から外した lock ファイル（§5.2）。0.2.0 までの `latest.json` には無い。無ければ空として扱う
 - `mode`: `online` / `offline`（どちらで照合したか。§4 の約束を後から確かめられるように残す）
 - `scanned_at`（リポジトリごと）: そのリポジトリを照合した時刻。`scan --id` で 1 つだけ差し替えたときに、ほかと時刻がずれるため
 - `findings` は OSV の記録から必要なものだけを抜く。説明文（`details`）・参照（`references`）は入れない
@@ -272,7 +273,14 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 
 - 手元のリポジトリでは `git ls-files` に出るもの（git が管理しているもの）だけを数える。osv-scanner も `.gitignore` を尊重するので、数え方をそろえる。
   git のリポジトリでないフォルダ（`--repo` で渡したものなど）と取り込み場所（§3.2）は、フォルダを歩いて数える（`node_modules`・`.venv` など、`.` で始まるフォルダは入らない）
-- lock ファイルが 1 つも無いリポジトリは osv-scanner を呼ばずに `no-lockfile`
+- **ほかの人のコードを取り込んだフォルダの中は対象から外す**（設定 `exclude_dirs`、§8）。lock ファイルの相対パスのフォルダ名のどれかが、
+  設定の名前のどれかと同じなら外す（大文字小文字は区別しない。`*` `?` を書ける。比べるのはフォルダ名だけで、ファイル名は見ない）
+  - 既定は `vendor` `vendors` `third_party` `third-party` `bower_components` `node_modules`。
+    そこにある lock ファイルは、取り込んだパッケージ自身の開発用（文書やテストの道具）で、このリポジトリが使う依存ではなく、自分では直せない
+    （2026-10-05、`app/Vendor/` の下の lock ファイルが、あるリポジトリの 313 件の一部と注意 7 件を占めていた）
+  - 外した lock ファイルは、リポジトリごとの `excluded`（相対パスの並び）に残す（§3.3）。黙って消さない
+  - 脆弱性の照合・全依存の台帳・注意のどれからも外れる。キャッシュの鍵（§6）は lock ファイルの並びから作るので、設定を変えれば照合し直しになる
+- lock ファイルが 1 つも無い（すべて外した場合も含む）リポジトリは osv-scanner を呼ばずに `no-lockfile`
 
 ### 5.3 脆弱性 DB
 
@@ -372,7 +380,7 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
   4. findings の表（重い順）: 深刻度・点数・パッケージ・版・直る版・ID（osv.dev へのリンク）と別名・要約・知らせの種類・lock ファイル・新規の印。
      悪意あるコード（`malicious`）には印を付け、1 件でもあれば要約の最初に件数を書く
   5. 注意（§3.5）の表: 種類・パッケージ・版・詳細・lock ファイル。新しく出たもの（`new_notices`）には新規の印。1 件も無ければ出さない。一覧（`index.html`）には件数の列を出す
-  6. 調べた lock ファイルの一覧
+  6. 調べた lock ファイルの一覧。対象から外したもの（`excluded`）があれば、その一覧と理由（設定 `exclude_dirs`）も書く
   7. `no-lockfile` / `error` のときは、その状態と理由だけ
 - 説明文（`details`）は載せない（`latest.json` に無い、§3.3）。詳しくは ID のリンク先で見る
 - **対応の節**（要約の次。`advice.actions` が作る）: 何をどう直すかを、直す順に番号を付けて書く。診断書をそのリポジトリで作業する人や
@@ -406,10 +414,13 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
   "parallel": 4,
   "db_max_age_days": 7,
   "cache_max_age_hours": 20,
-  "keep_results": 30
+  "keep_results": 30,
+  "exclude_dirs": ["vendor", "vendors", "third_party", "third-party", "bower_components", "node_modules"]
 }
 ```
 
+- `exclude_dirs`: この名前のフォルダの中の lock ファイルを対象から外す（§5.2）。`config set exclude_dirs "vendor,examples"` のように `,` で区切って書く。
+  空にすると何も外さない（場所の設定と違い、既定には戻らない）。`/` `\` を含む名前は誤り（フォルダ名だけを比べるため）
 - `data_dir`: 空なら `<app>/data`
 - `targets`: 空なら `<data>/targets.json`
 - `keep_results`: `results/` に残す過去の結果の数
@@ -442,7 +453,8 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 - 新しく出たものの知らせ方（RepoTether の表示だけか、Windows の通知も出すか）
 - Gogs で木の一覧を再帰的に取れるか（RepoTether 側の話）
 - 注意（§3.5）: 社内の npm レジストリを「レジストリ」に足す設定、`recent` の日数の設定、
-  `pnpm-lock.yaml`・`yarn.lock` を読むか、ほかの人のコードを取り込んだフォルダ（`app/Vendor/` など）の lock ファイルを対象から外すか
+  `pnpm-lock.yaml`・`yarn.lock` を読むか
+- `exclude_dirs` をリポジトリごとに変えられるようにするか（今は全体で 1 つ）
 - **保留（2026-10-03）**: Flutter の Android 側（Gradle の依存）を照合するか。osv-scanner は `gradle.lockfile`（Maven）を読めて、検出も確かめた。
   ただし Flutter の雛形は依存を固定しないので、各プロジェクトで `gradle.lockfile` を作って git に入れるか、LockWatch が Gradle を動かして作る必要がある
   （1 つ 1〜4 分、オフラインでは作れず Google・Maven Central への通信が要る）。今の手元のプロジェクトでは見つかるものが無く、効果が限られるので見送った。

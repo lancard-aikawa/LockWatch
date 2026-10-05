@@ -309,6 +309,11 @@ def render_repo(rid: str, entry: dict, latest: dict, *, new_ids: set[tuple[str, 
     lockfiles = entry.get("lockfiles") or []
     if lockfiles:
         out.append("<h2>調べた lock ファイル</h2>\n<ul>" + "".join(f'<li class="mono path">{_e(p)}</li>' for p in lockfiles) + "</ul>")
+    excluded = entry.get("excluded") or []
+    if excluded:
+        out.append(f"<h2>対象から外した lock ファイル</h2>\n<p>次の {len(excluded)} 個は、ほかの人のコードを取り込んだフォルダの中にあるため、"
+                   '調べていません（設定 <span class="mono">exclude_dirs</span>）。</p>\n<ul>'
+                   + "".join(f'<li class="mono path">{_e(p)}</li>' for p in excluded) + "</ul>")
     out.append(_footer(made_at, n_hidden, hide))
     if status == "ok":
         out.append(_data_block({

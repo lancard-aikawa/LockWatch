@@ -12,7 +12,17 @@ DEFAULTS: dict = {
     "db_max_age_days": 7,
     "cache_max_age_hours": 20,
     "keep_results": 30,
+    "exclude_dirs": ["vendor", "vendors", "third_party", "third-party", "bower_components", "node_modules"],
 }
+
+
+def _parse_names(s: str) -> list[str]:
+    """, で区切ったフォルダ名の並び。空なら何も外さない"""
+    names = [x.strip() for x in s.split(",") if x.strip()]
+    bad = [x for x in names if "/" in x or "\\" in x]
+    if bad:
+        raise ValueError(f"フォルダ名だけを書いてください（/ や \\ は使えません）: {', '.join(bad)}")
+    return names
 
 
 def _parse_bool(s: str) -> bool:
@@ -40,6 +50,7 @@ _PARSERS = {
     "db_max_age_days": _parse_positive_int,
     "cache_max_age_hours": _parse_positive_int,
     "keep_results": _parse_positive_int,
+    "exclude_dirs": _parse_names,
 }
 
 

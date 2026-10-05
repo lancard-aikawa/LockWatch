@@ -83,6 +83,9 @@ uv run lockwatch config show
   `requirements*.txt` の行は、osv-scanner が書かれた下限の版で照合するか、照合せずに 0 件とするので、その結果は当てにならない。
   ほかに、レジストリ以外（URL・git）から取るパッケージ、ハッシュの無い `package-lock.json`、公開から 7 日たっていない版（`uv.lock`）。
   `pnpm-lock.yaml` と `yarn.lock` は見ない（[docs/design.md](docs/design.md) §3.5）
+- ほかの人のコードを取り込んだフォルダ（`vendor`・`third_party`・`bower_components` など）の中の lock ファイルは調べない。
+  取り込んだパッケージ自身の開発用のもので、自分では直せないため。外したファイルは結果と診断書に書く。
+  フォルダ名は設定 `exclude_dirs` で変えられる（`uv run lockwatch config set exclude_dirs "vendor,examples"`。空にすると何も外さない）
 - 診断書（`report --html`）には「対応」の節がある。何をどう直すか（取り除く・版を固定する・どの版まで上げるか・確かめる）を直す順に書くので、
   そのリポジトリで作業する人や AI（Claude など）に診断書を渡せば、そのまま直し始められる。同じ内容を JSON でもファイルの中に入れている
 - 悪意あるコードとして報告されたパッケージ（OSV の `MAL-` の記録）は、深刻度を「緊急」にして `[malicious]`（画面と診断書では「悪意あるコード」）の印を付ける。

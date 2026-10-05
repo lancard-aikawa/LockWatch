@@ -107,6 +107,19 @@ class LockfilesTest(unittest.TestCase):
             self._tree(root, ["a/uv.lock", "node_modules/x/package-lock.json", ".venv/requirements.txt", "go.mod", "README.md"])
             self.assertEqual(lockfiles.find(root), ["a/uv.lock", "go.mod"])
 
+    def test_split_excluded_looks_at_folder_names_only(self):
+        found = ["app/Vendor/guzzle/docs/requirements.txt", "assets/bower_components/moment/yarn.lock", "libs/my-vendor/uv.lock",
+                 "third_party/x/go.mod", "uv.lock", "vendor.lock/Cargo.lock", "web/package-lock.json"]
+        kept, excluded = lockfiles.split_excluded(found, ["vendor", "bower_components", "third_party"])
+        # 大文字小文字は区別しない。名前の一部が同じだけ（my-vendor、vendor.lock）では外さない
+        self.assertEqual(kept, ["libs/my-vendor/uv.lock", "uv.lock", "vendor.lock/Cargo.lock", "web/package-lock.json"])
+        self.assertEqual(excluded, ["app/Vendor/guzzle/docs/requirements.txt", "assets/bower_components/moment/yarn.lock", "third_party/x/go.mod"])
+        self.assertEqual(lockfiles.split_excluded(found, ["*vendor*"])[0],
+                         ["assets/bower_components/moment/yarn.lock", "third_party/x/go.mod", "uv.lock", "web/package-lock.json"])
+        self.assertEqual(lockfiles.split_excluded(["vendor/uv.lock"], ["uv.lock"]), (["vendor/uv.lock"], []))  # ファイル名は見ない
+        for nothing in ([], None, [""], [3]):
+            self.assertEqual(lockfiles.split_excluded(found, nothing), (found, []))
+
     @unittest.skipUnless(shutil.which("git"), "git がありません")
     def test_find_counts_only_tracked_files_in_git(self):
         with tempfile.TemporaryDirectory() as d:

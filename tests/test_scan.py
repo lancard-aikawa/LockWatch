@@ -602,6 +602,41 @@ class ScanTest(unittest.TestCase):
         self.assertEqual(len(self.latest()["repos"]["unk"]["notices"]), 1)
         self.assertEqual(self.latest()["new_notices"], [])
 
+    # ---- ほかの人のコードを取り込んだフォルダを外す（design.md §5.2）
+
+    def test_vendored_lockfiles_are_excluded_and_listed(self):
+        self.mkrepo("priv", {"app/Vendor/lib/docs/requirements.txt": "sphinx\n", "assets/bower_components/x/package-lock.json": "{}"})
+        self.mkrepo("empty", {"vendor/pkg/uv.lock": "x"})
+        code, out, _ = self.run_cli("scan")
+        self.assertEqual(code, 0)
+        r = self.latest()["repos"]
+        self.assertEqual(r["priv"]["lockfiles"], ["uv.lock"])
+        self.assertEqual(r["priv"]["excluded"], ["app/Vendor/lib/docs/requirements.txt", "assets/bower_components/x/package-lock.json"])
+        self.assertEqual(r["priv"]["notices"], [])  # 外したファイルの注意（版の指定なしの sphinx）は出さない
+        self.assertEqual(r["pub"]["excluded"], [])
+        # 全部外れたら lock ファイルなし。外したことは残す
+        self.assertEqual((r["empty"]["status"], r["empty"]["excluded"]), ("no-lockfile", ["vendor/pkg/uv.lock"]))
+        offline = [c for c in self.fake.scans() if "--offline" in c]
+        self.assertEqual(self.given(offline[0]), ["priv/uv.lock", "unk/sub/requirements-dev.txt"])  # osv-scanner にも渡さない
+        self.assertRegex(out, r"(?m)^ok +offline priv  .*（対象外の lock ファイル 2 個）$")
+        self.assertRegex(out, r"(?m)^no-lockfile online  empty  lock ファイルなし（対象外の lock ファイル 1 個）$")
+
+    def test_exclude_dirs_setting_changes_what_is_scanned(self):
+        self.mkrepo("priv", {"app/Vendor/lib/requirements.txt": "sphinx\n", "examples/demo/requirements.txt": "flask\n"})
+        self.run_cli("scan")
+        n = len(self.fake.scans())
+        self.assertEqual(self.latest()["repos"]["priv"]["lockfiles"], ["examples/demo/requirements.txt", "uv.lock"])
+        # 設定を変えると lock ファイルの並びが変わるので、キャッシュは使われず照合し直す
+        self.run_cli("config", "set", "exclude_dirs", "examples")
+        self.run_cli("scan")
+        self.assertGreater(len(self.fake.scans()), n)
+        e = self.latest()["repos"]["priv"]
+        self.assertEqual((e["lockfiles"], e["excluded"]), (["app/Vendor/lib/requirements.txt", "uv.lock"], ["examples/demo/requirements.txt"]))
+        self.run_cli("config", "set", "exclude_dirs", "")
+        self.run_cli("scan")
+        e = self.latest()["repos"]["priv"]
+        self.assertEqual((len(e["lockfiles"]), e["excluded"]), (3, []))
+
     # ---- db-update（design.md §5.3）
 
     def test_db_update_scans_only_offline_with_download(self):

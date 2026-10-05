@@ -32,7 +32,7 @@ INFORMATIONAL_LABEL = {"unmaintained": "保守終了", "unsound": "安全性の�
 MALICIOUS_LABEL = "悪意あるコード"
 PACKAGE_ROWS_MAX = 2000   # 台帳のタブに出す行の上限（件数は全部を数える）
 
-# 設定の項目: (キー, 表示名, 種類, 説明)。種類は dir / file / bool / int
+# 設定の項目: (キー, 表示名, 種類, 説明)。種類は dir / file / bool / int / list（, で区切った並び）
 CONFIG_FIELDS = [
     ("online_public", "公開リポジトリをオンラインで照合", "bool",
      "切ると、公開リポジトリも手元の脆弱性 DB で照合し、何も外 (api.osv.dev) に送らない。非公開のものはどちらでも外に送らない"),
@@ -43,6 +43,8 @@ CONFIG_FIELDS = [
     ("db_max_age_days", "手元の DB を取り直す日数", "int", "これより古ければ、照合の前に取り直す"),
     ("cache_max_age_hours", "キャッシュの有効時間 (時間)", "int", "lock ファイルが同じなら、この時間内は前回の結果を使う"),
     ("keep_results", "残す過去の結果の数", "int", "results/ に残す数"),
+    ("exclude_dirs", "対象から外すフォルダ名", "list",
+     "この名前のフォルダの中の lock ファイルは調べない (ほかの人のコードを取り込んだフォルダ)。, で区切る。* ? を書ける。空にすると何も外さない"),
 ]
 
 
@@ -548,6 +550,8 @@ class App:
             v = self.cfg.get(key)
             if kind == "bool":
                 self.fields[key].set(bool(v))
+            elif kind == "list":
+                self.fields[key].set(", ".join(str(x) for x in v) if isinstance(v, list) else "")
             else:
                 self.fields[key].set("" if v is None else str(v))
 

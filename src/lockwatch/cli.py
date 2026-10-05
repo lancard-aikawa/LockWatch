@@ -158,6 +158,8 @@ def _print_repo(rid: str, e: dict) -> None:
         detail = e.get("error", "")
     else:
         detail = "lock ファイルなし"
+    if e.get("excluded"):
+        detail += f"（対象外の lock ファイル {len(e['excluded'])} 個）"
     print(f"{e['status']:<11} {e['mode']:<7} {rid}  {detail}")
 
 

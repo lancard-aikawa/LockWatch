@@ -166,6 +166,15 @@ class RenderTest(unittest.TestCase):
         self.assertIn('"actions": []', page)
         self.assertNotIn("lockwatch-report", self.render("local:C:/Repos/broken"))  # 照合できなかったものには入れない
 
+    def test_excluded_lockfiles_are_listed(self):
+        entry = {"status": "ok", "visibility": "private", "mode": "offline", "lockfiles": ["uv.lock"], "findings": [],
+                 "excluded": ["app/Vendor/<x>/requirements.txt"]}
+        page = htmlreport.render_repo("r", entry, LATEST, new_ids=set(), n_hidden=0, hide=set(), made_at=self.made_at)
+        self.assertIn("<h2>対象から外した lock ファイル</h2>", page)
+        self.assertIn("次の 1 個は", page)
+        self.assertIn("app/Vendor/&lt;x&gt;/requirements.txt", page)
+        self.assertNotIn("対象から外した", self.render("github.com/example/web-app"))  # excluded の無い古い結果
+
     def test_private_is_marked(self):
         page = self.render("github.com/example/private-app")
         self.assertIn("社外に出さないでください", page)

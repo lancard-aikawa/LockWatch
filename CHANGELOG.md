@@ -4,6 +4,11 @@
 
 ## 未公開
 
+- ほかの人のコードを取り込んだフォルダの中の lock ファイルを、対象から外す（設定 `exclude_dirs`。既定は `vendor` `vendors` `third_party` `third-party`
+  `bower_components` `node_modules`）。そこにある lock ファイルは取り込んだパッケージ自身の開発用で、自分では直せない。
+  **既定で効くので、該当するリポジトリは件数が減る**（脆弱性・台帳・注意のどれからも外れる）。外した lock ファイルは結果の `excluded` に残り、
+  `scan` / `report` の行と診断書に出る。フォルダ名は大文字小文字を区別せず、`*` `?` を書ける。
+  `lockwatch config set exclude_dirs ""` で何も外さなくなる。画面の「設定」タブでも変えられる
 - 診断書（`report --html`）に「対応」の節を足す。何をどう直すかを、直す順に書く: 悪意あるコードを取り除く、`requirements*.txt` の版を固定する、
   パッケージごとに上げる先の版の目安、残りの注意を確かめる。診断書をそのリポジトリで作業する人や AI（Claude など）に渡せば、これだけで直し始められる。
   同じ内容を、機械で読める JSON（`<script type="application/json" id="lockwatch-report">`）としてもファイルの中に入れる。

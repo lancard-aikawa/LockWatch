@@ -201,6 +201,12 @@ class AppTest(unittest.TestCase):
         saved = json.loads(self.config.read_text(encoding="utf-8"))
         self.assertEqual((saved["online_public"], saved["parallel"]), (False, 8))
         self.assertEqual(saved["future_key"], 1)  # 知らないキーは残す
+        # 並びの設定は , で区切って見せ、並びとして保存する
+        self.assertEqual(self.app.fields["exclude_dirs"].get(), ", ".join(cfgmod.DEFAULTS["exclude_dirs"]))
+        self.app.fields["exclude_dirs"].set("vendor, examples")
+        self.assertTrue(self.app.save_settings())
+        self.assertEqual(json.loads(self.config.read_text(encoding="utf-8"))["exclude_dirs"], ["vendor", "examples"])
+        self.assertEqual(self.app.fields["exclude_dirs"].get(), "vendor, examples")
         self.app.fields["parallel"].set("0")
         self.assertFalse(self.app.save_settings())
         self.assertIn("保存しませんでした", self.app.settings_message.cget("text"))

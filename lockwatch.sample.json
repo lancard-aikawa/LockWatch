@@ -6,5 +6,6 @@
   "parallel": 4,
   "db_max_age_days": 7,
   "cache_max_age_hours": 20,
-  "keep_results": 30
+  "keep_results": 30,
+  "exclude_dirs": ["vendor", "vendors", "third_party", "third-party", "bower_components", "node_modules"]
 }

@@ -46,6 +46,17 @@ class CliTest(unittest.TestCase):
         self.assertEqual(shown["parallel"], 4)
         self.assertEqual(Path(shown["_effective_targets"]), self.dir / "data" / "targets.json")
 
+    def test_config_exclude_dirs(self):
+        shown = json.loads(run([*self.base, "config", "show"])[1])
+        self.assertIn("vendor", shown["exclude_dirs"])  # 既定で、取り込んだコードのフォルダを外す
+        self.assertEqual(run([*self.base, "config", "set", "exclude_dirs", " vendor , examples,, "])[0], 0)
+        self.assertEqual(json.loads(run([*self.base, "config", "show"])[1])["exclude_dirs"], ["vendor", "examples"])
+        code, _, err = run([*self.base, "config", "set", "exclude_dirs", "app/Vendor"])
+        self.assertEqual(code, 2)  # フォルダ名だけ
+        self.assertIn("フォルダ名だけ", err)
+        self.assertEqual(run([*self.base, "config", "set", "exclude_dirs", ""])[0], 0)
+        self.assertEqual(json.loads(run([*self.base, "config", "show"])[1])["exclude_dirs"], [])  # 空は「何も外さない」
+
     def test_targets_check(self):
         local = self.dir / "repo"
         local.mkdir()
