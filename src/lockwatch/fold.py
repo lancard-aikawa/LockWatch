@@ -13,7 +13,9 @@ def hidden(f: dict, hide: set[str]) -> bool:
     return f.get("severity") in hide or f.get("informational") in hide
 
 # 畳み方の版。finding の作り方を変えたら上げる（キャッシュの鍵に入り、古い畳み方のキャッシュを使わなくなる）
-SHAPE = 4
+SHAPE = 5
+
+MALICIOUS_PREFIX = "MAL-"   # OpenSSF の malicious-packages の記録（悪意あるコード）
 
 
 def severity(score: float | None) -> str:
@@ -106,6 +108,10 @@ def by_source(data: dict) -> dict[str, list[dict]]:
                 vid = ids[0]
                 mine = [vulns[i] for i in ids if i in vulns]
                 score = _score(g.get("max_severity"))
+                malicious = any(isinstance(i, str) and i.startswith(MALICIOUS_PREFIX) for i in [*ids, *(g.get("aliases") or [])])
+                sev = _label(mine) or severity(score)  # 区分を優先し、無ければ点数から
+                if malicious and sev == "unknown":
+                    sev = "critical"  # MAL- には区分も点数も無い。unknown のまま一番下に沈めない
                 found.append({
                     "lockfile": "",
                     "ecosystem": info.get("ecosystem", ""),
@@ -113,12 +119,28 @@ def by_source(data: dict) -> dict[str, list[dict]]:
                     "version": info.get("version", ""),
                     "id": vid,
                     "aliases": [a for a in _unique([*(g.get("aliases") or []), *ids]) if a != vid],
-                    "severity": _label(mine) or severity(score),  # 区分を優先し、無ければ点数から
+                    "severity": sev,
                     "score": score,
                     "fixed": _fixed(mine, name),
                     "informational": _informational(mine, name),
+                    "malicious": malicious,
                     "summary": next((v["summary"] for v in mine if v.get("summary")), ""),
                 })
+    return out
+
+
+def packages_by_source(data: dict) -> dict[str, list[tuple[str, str, str]]]:
+    """{path_key(source.path): [(生態系, 名前, 版), ...]}。--all-packages で出た全パッケージ（脆弱性の有無は問わない）"""
+    out: dict[str, list[tuple[str, str, str]]] = {}
+    for result in data.get("results") or []:
+        src = (result.get("source") or {}).get("path")
+        if not src:
+            continue
+        found = out.setdefault(path_key(src), [])
+        for pkg in result.get("packages") or []:
+            info = pkg.get("package") or {}
+            if info.get("name"):
+                found.append((info.get("ecosystem", ""), info["name"], info.get("version", "")))
     return out
 
 

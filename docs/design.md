@@ -7,6 +7,8 @@
 
 自分のリポジトリ全部の依存（lock ファイル）を osv-scanner にかけ、脆弱性を「リポジトリ × パッケージ × 深刻度 × 直る版」の表にする。
 裏で定期的に回し、前回から**新しく出たもの**を知らせる。
+あわせて、脆弱性の無いものも含めた**全依存の台帳**（どのリポジトリが何のどの版を使っているか）を残す。
+「この版が侵害された」という知らせが出た日に、照合し直さずに手元で引くため（§3.4）。
 
 脆弱性を探す部分は自作しない。osv-scanner（2.6.0、winget で版固定）に任せ、LockWatch はその周りだけを作る:
 対象の受け取り、osv-scanner の呼び分け、結果の畳み方、キャッシュ、前回との差分。
@@ -89,6 +91,7 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 <data>/
   results/latest.json            最新の結果（RepoTether はこれを読む）
   results/<YYYYMMDDTHHMMSSZ>.json 過去の結果（差分の元。間引きは設定）
+  results/packages.json          全依存の台帳（§3.4。RepoTether は読まない）
   cache/<key>.json               リポジトリごとの osv-scanner の結果を畳んだもの（§6）
   incoming/...                   §3.2
   lock                           実行中の印（§7）
@@ -120,13 +123,14 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
           "score": 7.5,
           "fixed": ["6.0.9"],
           "informational": null,
+          "malicious": false,
           "summary": "..."
         }
       ]
     }
   },
   "new": [
-    {"repo": "github.com/example/web-app", "package": "vite", "id": "GHSA-xxxx-xxxx-xxxx", "severity": "high", "informational": null}
+    {"repo": "github.com/example/web-app", "package": "vite", "id": "GHSA-xxxx-xxxx-xxxx", "severity": "high", "informational": null, "malicious": false}
   ]
 }
 ```
@@ -150,10 +154,40 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
   2026-10-01 の自分のリポジトリ全体では RUSTSEC 67 件中 `unmaintained` 30・`unsound` 13
   - severity は変えない（区分も点数も無ければ `unknown` のまま）。`new` からも外さない
   - 消すかどうかは表示する側が決める（`report --hide`、RepoTether のフィルタ）。`unsound` は実際のバグなので、`unmaintained` と一緒に既定で消さない
+- `malicious`: 悪意あるコードの記録か（OpenSSF の malicious-packages。束の `ids` か `aliases` に `MAL-` で始まるものがある）。
+  手元の DB にも入っていて、オフラインの照合でも検出する（2026-10-05 確認。npm の DB 23 万件のうち 22 万件が `MAL-`）
+  - `MAL-` の記録には区分も点数も無い。`unknown` のままだと一覧の一番下に沈み、`--hide unknown` で消えるので、
+    **区分も点数も無い `malicious` は `severity` を `critical` にする**（`score` は `null` のまま。区分か点数があればそちらを使う）
+  - 直る版は無いのが普通（その版を入れた時点で実行されている）。表示では「悪意あるコード」の印を付ける。`--hide` の種類には入れない（まとめて消せるものにしない）
+  - 0.2.0 までの `latest.json` には無い。無ければ `false` として扱う
 - `new` は前回の `latest.json` に無かった `(repo, package, id)` の組。前回が無ければ空（初回にすべてを「新しい」と言わない）。
-  各項目にも `severity` と `informational` を入れる（表示する側が `latest.json` を引き直さずにフィルタできるように）。
+  各項目にも `severity`・`informational`・`malicious` を入れる（表示する側が `latest.json` を引き直さずにフィルタできるように）。
   リポジトリ単位でも同じで、前回の `latest.json` に無かったリポジトリと、前回 `ok` でなかったリポジトリは比べない
   （対象に足したとき・エラーから戻ったときに、全部を「新しい」と言わない）
+
+### 3.4 全依存の台帳（`results/packages.json`）
+
+```json
+{
+  "format": 1,
+  "repos": {
+    "github.com/example/web-app": {
+      "scanned_at": "2026-10-02T09:01:30+09:00",
+      "packages": [
+        ["pnpm-lock.yaml", "npm", "vite", "6.0.1"],
+        ["src-tauri/Cargo.lock", "crates.io", "serde", "1.0.210"]
+      ]
+    }
+  }
+}
+```
+
+- osv-scanner の `--all-packages` が出す、lock ファイルの中の全パッケージ（脆弱性の有無は問わない）。1 件は `[lock ファイル, 生態系, 名前, 版]`。並びはこの 4 つの順で、重複は除く
+- 入るのは `status` が `ok` のリポジトリだけ。`scan` が `latest.json` と一緒に書く（`scan --id` はそのリポジトリの分だけ差し替える。`scan --repo` は書かない）
+- `latest.json` に入れないのは、大きくなるため（RepoTether が毎回読む。過去の結果にも 30 回分残る）。台帳は最新の 1 つだけで、過去の分は残さない
+- 字下げなしで書く（1 件が 1 行に収まらず、字下げすると 5 倍の行数になる）
+- 非公開のリポジトリの依存の一覧を含む。データフォルダの外に出さない（`latest.json` と同じ）
+- 引くのは `lockwatch packages`（§7）
 
 ## 4. private は外に送らない
 
@@ -177,6 +211,8 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 - 必ず `--no-resolve`。付けないと 6 倍遅く、増えるのは推移依存を外部（deps.dev）で解決した分。
   **private で付け忘れると、deps.dev にパッケージ名が送られる**ので、オフラインの呼び出しでは必ず付ける
 - `--format json --output-file <一時ファイル>`。標準出力は使わない
+- `--all-packages`（脆弱性の無いパッケージも JSON に出す。全依存の台帳 §3.4 の元）。出力に載せるものが増えるだけで、
+  オフラインでもそのまま動く（2026-10-05 確認。脆弱性の無いパッケージは `package` だけを持ち、`groups` と `vulnerabilities` が無い）
 - フォルダ（`-r`）ではなく、LockWatch が数えた lock ファイルを `-L <絶対パス>` で 1 つずつ渡す（§5.2）。
   キャッシュの鍵（§6）と osv-scanner が読むものを一致させるため（フォルダで渡すと `pom.xml` なども読む）。
   `requirements-dev.txt` のような名前も `-L` で読める（2026-10-02 確認）
@@ -217,6 +253,7 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
   ただし押した人には「照合し直したのに時刻が変わらない」と見えるので、RepoTether は先に `scan --check` で確かめ、
   キャッシュが効くときは照合し直すかを選ばせる（§7）
 - オフラインの照合は、そのリポジトリの生態系の DB の取得時刻も鍵に入れる（DB を取り直したら照合し直す）
+- 中身は findings と、そのリポジトリの全パッケージ（§3.4 の `packages`）
 - 残すのは `ok` だけ。ファイル名は鍵の SHA-256。期限を過ぎたものは `scan` の終わりに消す
 
 ## 7. 実行
@@ -230,6 +267,7 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 | `lockwatch scan --no-cache` | キャッシュを読まずに照合し直す（書くのはいつもどおり）。`--id` / `--repo` とも使える |
 | `lockwatch report` | `latest.json` を表にして表示（`--new` で新しいものだけ、`--json`。`--hide <種類>` を重ねて消す: `unmaintained` などの `informational` の値か、`low` などの `severity` の値。`--id <id>` でそのリポジトリだけ） |
 | `lockwatch report --html` | リポジトリごとの診断書（HTML）を書く（§7.1） |
+| `lockwatch packages [<名前>]` | 全依存の台帳（§3.4）を引く。照合はしない |
 | `lockwatch status` | 使える状態かを表示する（`--json`）。LockWatch の版、osv-scanner の場所と版（`--version` だけ呼ぶ）、データと targets.json の場所と件数、最後の照合、手元の DB の取得時刻、定期実行（タスク「LockWatch scan」）が登録されているか。RepoTether の設定の「確かめる」が使う |
 | `lockwatch db-update` | 脆弱性 DB を取り直す。手元の DB で照合するリポジトリ（§4）を、取り直し付きで 1 回照合する。結果はキャッシュにだけ入れ、`results/` は書かない |
 | `lockwatch config show / set` | 設定（SessionVault と同じ作り） |
@@ -245,6 +283,14 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
   - `--json` は `latest.json` と同じ形で、`--hide` を当てた後のもの。`--new` と一緒なら `new` の配列だけ
   - `--id` はそのリポジトリだけにする（`new` もそのリポジトリの分だけ）。`latest.json` に無ければ終了コード 2
   - `latest.json` がまだ無ければ、その旨を出して終了コード 2
+- `packages`:
+  - `<名前>` があれば、その名前のパッケージを使っているところを「リポジトリ・版・生態系・lock ファイル」で出す。
+    大文字小文字は区別しない。`*` `?` を書ける（`@babel/*`）。PyPI の名前の `-` `_` `.` の違いはそろえない
+  - `--version <版>`（その版だけ。文字どおりの一致）、`--ecosystem <生態系>`（`npm` `PyPI` `crates.io` など。大文字小文字は区別しない）、`--id <id>`（そのリポジトリだけ）で絞る
+  - `<名前>` が無ければ、リポジトリごとの件数だけを出す（絞り込みは効く）
+  - `--json`: `<名前>` があれば `[{"repo", "lockfile", "ecosystem", "package", "version"}, ...]`、無ければ `packages.json` と同じ形（絞り込んだ後のもの）
+  - 見つからなくても終了コードは 0（「使っていない」は答えの 1 つ）。`packages.json` がまだ無ければ、その旨を出して終了コード 2
+  - 台帳は最後に照合したときのもの。照合した時刻を一緒に出す（lock ファイルをその後に変えていれば、照合し直すまで反映されない）
 - 同時に 2 つ走らせない。`<data>/lock` を OS のファイルロック（Windows は `msvcrt.locking`）で押さえ、取れなければ「実行中」で終わる（終了コード 3）。
   ファイルがあるだけでは実行中としない（落ちたあとに残ったファイルで止まらないように）
 - 終了コード: 0 = 終わった（脆弱性の有無は問わない）、1 = 想定外の失敗（LockWatch の誤り。`--log` なら例外の内容を書く）、2 = 引数の誤り、3 = 実行中、4 = osv-scanner が無い・失敗した
@@ -282,7 +328,8 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
      手元の DB の取得時刻（手元の DB で照合したときだけ）、診断書を作った時刻と LockWatch の版
   2. 公開でないリポジトリには「非公開のリポジトリの依存の一覧を含みます。社外に出さないでください」と書く
   3. 要約: 深刻度ごとの件数、直る版があるものの件数、前回から新しく出たものの件数
-  4. findings の表（重い順）: 深刻度・点数・パッケージ・版・直る版・ID（osv.dev へのリンク）と別名・要約・知らせの種類・lock ファイル・新規の印
+  4. findings の表（重い順）: 深刻度・点数・パッケージ・版・直る版・ID（osv.dev へのリンク）と別名・要約・知らせの種類・lock ファイル・新規の印。
+     悪意あるコード（`malicious`）には印を付け、1 件でもあれば要約の最初に件数を書く
   5. 調べた lock ファイルの一覧
   6. `no-lockfile` / `error` のときは、その状態と理由だけ
 - 説明文（`details`）は載せない（`latest.json` に無い、§3.3）。詳しくは ID のリンク先で見る
@@ -311,7 +358,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 
 ## 9. 画面（`lockwatch gui`）
 
-設定の編集・状態の確認・結果の閲覧を 1 つの窓でできるようにする。RepoTether の設定の「脆弱性」タブの「LockWatch を開く」からも開く。
+設定の編集・状態の確認・結果の閲覧・台帳の検索を 1 つの窓でできるようにする。RepoTether の設定の「脆弱性」タブの「LockWatch を開く」からも開く。
 
 - tkinter で作る（実行時の依存を足さない）。`scripts\lockwatch-gui.cmd` で開けば黒い窓は出ない（§7 と同じく本体の `pythonw.exe` と `lockwatch-launch.py` を使う）
 - tkinter の落とし穴の対策（グローバルの CLAUDE.md）: タブは選ばれたものがはっきり分かるスタイル、下のボタン行は本体より先に `side=BOTTOM` で置く、絵文字は使わない
@@ -321,7 +368,8 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 | タブ | 中身 |
 |---|---|
 | 状態 | `status` の内容。ボタン: 全体を照合（`scan`）・DB を取り直す（`db-update`）・定期実行を登録 / 解除（`scripts/register-task.ps1`）・前回のログを開く（`last-run.log`）。動かした仕事の出力を下に出す |
-| 結果 | `latest.json` の一覧（リポジトリ・パッケージ・版・深刻度・ID・直る版・知らせの種類・lock ファイル）。重い順。「隠す」（深刻度・知らせの種類）、「新しく出たものだけ」、文字で絞り込み。行をダブルクリックすると `https://osv.dev/vulnerability/<id>` を開く |
+| 結果 | `latest.json` の一覧（リポジトリ・パッケージ・版・深刻度・ID・直る版・知らせの種類・lock ファイル）。重い順。悪意あるコード（`malicious`）は知らせの列に「悪意あるコード」と出す。「隠す」（深刻度・知らせの種類）、「新しく出たものだけ」、文字で絞り込み。行をダブルクリックすると `https://osv.dev/vulnerability/<id>` を開く |
+| 台帳 | 全依存の台帳（`packages.json`、§3.4）を引く。名前と版を入れると、使っているところを「パッケージ・版・生態系・リポジトリ・lock ファイル」で出す。名前は大文字小文字を区別しない部分一致（`*` `?` を書いたときは、`lockwatch packages` と同じく全体の一致）。版は文字どおりの一致。名前も版も空なら何も出さない（全件は多すぎる）。出すのは先頭 2,000 行までで、件数は全部を数える。照合はしない |
 | 設定 | §8 の項目を編集して保存する。値は `config set` と同じ規則で検査し、誤りがあれば保存しない。`online_public` には、切ると何も外に送らないことを書き添える。保存は `config.save`（一時ファイルから入れ替え） |
 
 - 画面を開いているあいだに定期実行が結果を書いても、自動では読み直さない（「読み直す」ボタン）

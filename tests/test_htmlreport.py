@@ -93,6 +93,15 @@ class RenderTest(unittest.TestCase):
         self.assertIn('<th data-sort="rank"><button type="button">深刻度</button></th>', page)
         self.assertIn('data-hide="info" value="unmaintained"', self.render("github.com/example/private-app"))
 
+    def test_malicious_is_marked_and_counted(self):
+        entry = {"status": "ok", "visibility": "private", "mode": "offline", "lockfiles": ["uv.lock"],
+                 "findings": [{**finding("evil-pkg", "MAL-2026-1", "critical", fixed=()), "malicious": True},
+                              finding("requests", "PYSEC-1", "high")]}
+        page = htmlreport.render_repo("r", entry, LATEST, new_ids=set(), n_hidden=0, hide=set(), made_at=self.made_at)
+        self.assertIn('<span class="tag mal">悪意あるコード</span>', page)
+        self.assertIn("悪意あるコードとして報告されたパッケージが 1 件あります", page)
+        self.assertNotIn("悪意あるコード", self.render("github.com/example/web-app"))  # malicious の無い古い結果
+
     def test_private_is_marked(self):
         page = self.render("github.com/example/private-app")
         self.assertIn("社外に出さないでください", page)

@@ -109,6 +109,7 @@ class ScanTest(unittest.TestCase):
         offline = [c for c in scans if "--offline" in c]
         self.assertEqual([self.given(c) for c in online], [["pub/pnpm-lock.yaml"]])
         self.assertIn("--no-resolve", online[0])
+        self.assertTrue(all("--all-packages" in c for c in scans))  # 全依存の台帳の元（design.md §3.4）
         # private と unknown はまとめて 1 回、手元の DB で
         self.assertEqual(len(offline), 1)
         self.assertEqual(self.given(offline[0]), ["priv/uv.lock", "unk/sub/requirements-dev.txt"])
@@ -162,7 +163,8 @@ class ScanTest(unittest.TestCase):
         code, out, _ = self.run_cli("scan")
         self.assertEqual(code, 0)
         self.assertEqual(self.latest()["new"],
-                         [{"repo": "pub", "package": "vite", "id": "GHSA-cccc-cccc-cccc", "severity": "medium", "informational": None}])
+                         [{"repo": "pub", "package": "vite", "id": "GHSA-cccc-cccc-cccc", "severity": "medium", "informational": None,
+                           "malicious": False}])
         self.assertIn("新しく出たもの: 1 件", out)
 
     def test_informational_is_still_new(self):
@@ -441,6 +443,100 @@ class ScanTest(unittest.TestCase):
         code, out, _ = self.run_cli("report", "--new", "--hide", "unmaintained")
         self.assertIn("新しく出たもの: 1 件", out)
         self.assertIn("1 件を消しています", out)
+
+    # ---- 悪意あるコードと全依存の台帳（design.md §3.3・§3.4）
+
+    def packages(self):
+        return json.loads((self.data / "results" / "packages.json").read_text(encoding="utf-8"))
+
+    def test_malicious_is_critical_and_marked(self):
+        self.fake.fixture = "osv_all.json"
+        self.run_cli("scan")
+        mal = next(f for f in self.latest()["repos"]["pub"]["findings"] if f["package"] == "evil-pkg")
+        self.assertEqual((mal["malicious"], mal["severity"]), (True, "critical"))
+        code, out, _ = self.run_cli("report")
+        self.assertEqual(code, 0)
+        self.assertIn("critical evil-pkg 9.9.9  MAL-2026-0001  [malicious]", out)
+        # 後から出てきたら「新しく出たもの」にも印が付く
+        self.fake.fixture = "osv_basic.json"
+        self.run_cli("scan", "--no-cache")
+        self.fake.fixture = "osv_all.json"
+        code, out, _ = self.run_cli("scan", "--no-cache")
+        self.assertEqual([(n["package"], n["malicious"]) for n in self.latest()["new"]], [("evil-pkg", True)])
+        self.assertIn("MAL-2026-0001  [malicious]", out)
+
+    def test_packages_json_lists_all_packages_of_ok_repos(self):
+        self.fake.fixture = "osv_all.json"
+        self.run_cli("scan")
+        doc = self.packages()
+        self.assertEqual(doc["format"], 1)
+        self.assertEqual(set(doc["repos"]), {"pub", "priv", "unk"})  # no-lockfile と error は入れない
+        self.assertEqual(doc["repos"]["pub"]["packages"],  # 重複は除き、並べる。脆弱性の無いものも入る
+                         [["pnpm-lock.yaml", "npm", "esbuild", "0.21.5"], ["pnpm-lock.yaml", "npm", "esbuild", "0.24.0"],
+                          ["pnpm-lock.yaml", "npm", "evil-pkg", "9.9.9"], ["pnpm-lock.yaml", "npm", "vite", "6.0.1"]])
+        self.assertEqual(doc["repos"]["pub"]["scanned_at"], self.latest()["repos"]["pub"]["scanned_at"])
+        self.assertNotIn("packages", self.latest()["repos"]["pub"])  # latest.json には入れない（大きくなる）
+        self.assertEqual(len(list((self.data / "results").glob("2*.json"))), 1)  # 過去の分は残さない
+        # キャッシュから返したときも同じ台帳になる
+        n = len(self.fake.scans())
+        self.run_cli("scan")
+        self.assertEqual(len(self.fake.scans()), n)
+        self.assertEqual(self.packages(), doc)
+
+    def test_packages_json_with_id_and_repo(self):
+        self.fake.fixture = "osv_all.json"
+        self.run_cli("scan")
+        before = self.packages()
+        self.fake.fixture = "osv_basic.json"
+        self.assertEqual(self.run_cli("scan", "--id", "pub", "--no-cache")[0], 0)
+        after = self.packages()
+        self.assertEqual(after["repos"]["pub"]["packages"], [["pnpm-lock.yaml", "npm", "vite", "6.0.1"]])
+        self.assertEqual(after["repos"]["priv"], before["repos"]["priv"])  # ほかはそのまま
+        self.run_cli("scan", "--repo", str(self.repos / "unk"))
+        self.assertEqual(self.packages(), after)  # --repo は書かない
+        # ok でなくなったリポジトリの古い台帳は残さない
+        self.fake.exit_code = 127
+        self.assertEqual(self.run_cli("scan", "--id", "pub", "--no-cache")[0], 4)
+        self.assertEqual(set(self.packages()["repos"]), {"priv", "unk"})
+
+    def test_packages_command(self):
+        code, _, err = self.run_cli("packages", "vite")
+        self.assertEqual(code, 2)
+        self.assertIn("台帳がまだありません", err)
+        self.fake.fixture = "osv_all.json"
+        self.run_cli("scan")
+
+        code, out, _ = self.run_cli("packages", "ESBUILD")  # 大文字小文字は区別しない
+        self.assertEqual(code, 0)
+        self.assertIn("  esbuild 0.21.5  npm  pub  （pnpm-lock.yaml）", out)
+        self.assertIn("  esbuild 0.24.0  PyPI  unk  （sub/requirements-dev.txt）", out)
+        self.assertIn("3 件（2 リポジトリ）", out)
+        self.assertIn("照合 ", out)
+
+        hits = json.loads(self.run_cli("packages", "esbuild", "--version", "0.24.0", "--json")[1])
+        self.assertEqual(hits, [
+            {"repo": "pub", "lockfile": "pnpm-lock.yaml", "ecosystem": "npm", "package": "esbuild", "version": "0.24.0"},
+            {"repo": "unk", "lockfile": "sub/requirements-dev.txt", "ecosystem": "PyPI", "package": "esbuild", "version": "0.24.0"}])
+        hits = json.loads(self.run_cli("packages", "esbuild", "--ecosystem", "pypi", "--json")[1])
+        self.assertEqual([h["repo"] for h in hits], ["unk"])
+        hits = json.loads(self.run_cli("packages", "e*", "--id", "pub", "--json")[1])
+        self.assertEqual(sorted({h["package"] for h in hits}), ["esbuild", "evil-pkg"])
+        self.assertEqual([h["package"] for h in json.loads(self.run_cli("packages", "requests", "--json")[1])], ["Requests"])
+
+        code, out, _ = self.run_cli("packages", "left-pad")
+        self.assertEqual(code, 0)  # 「使っていない」は答えの 1 つ
+        self.assertIn("使っているリポジトリはありません", out)
+
+        code, out, _ = self.run_cli("packages")
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"(?m)^ +4  pub$")
+        self.assertIn("7 件（3 リポジトリ）", out)
+        doc = json.loads(self.run_cli("packages", "--ecosystem", "npm", "--json")[1])
+        self.assertEqual({rid: len(e["packages"]) for rid, e in doc["repos"].items()}, {"pub": 4, "priv": 0, "unk": 0})
+
+        code, _, err = self.run_cli("packages", "vite", "--id", "nowhere")
+        self.assertEqual(code, 2)
+        self.assertIn("台帳にありません", err)
 
     # ---- db-update（design.md §5.3）
 

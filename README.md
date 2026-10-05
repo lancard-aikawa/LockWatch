@@ -45,7 +45,7 @@
 画面で使うなら:
 
 ```cmd
-run-lockwatch.bat            :: 状態・結果・設定の画面（このフォルダの直下。ダブルクリックで開く。黒い窓は残らない）
+run-lockwatch.bat            :: 状態・結果・台帳・設定の画面（このフォルダの直下。ダブルクリックで開く。黒い窓は残らない）
 scripts\lockwatch-gui.cmd    :: 同じもの（run-lockwatch.bat はこれを呼ぶだけ）
 ```
 
@@ -54,6 +54,7 @@ uv 0.11 が作る `.venv\Scripts\pythonw.exe` はコンソール用の `python.e
 
 - **状態**: LockWatch・osv-scanner の版、受け渡し、最後の照合、手元の DB、定期実行。全体の照合・DB の取り直し・定期実行の登録 / 解除もここから
 - **結果**: 脆弱性の一覧（重い順）。深刻度や「保守終了」などで隠せる。行をダブルクリックすると osv.dev が開く。「診断書を出す」でリポジトリごとの診断書（HTML）を書いて一覧を開く
+- **台帳**: どのリポジトリが、そのパッケージのどの版を使っているかを引く（脆弱性の無いものも含めた全依存。名前は部分一致、版は同じものだけ）。照合はしない
 - **設定**: `lockwatch.json` の項目を編集して保存（`config set` と同じ検査）
 
 RepoTether の設定の「脆弱性」タブの「LockWatch を開く」からも開ける。
@@ -67,6 +68,8 @@ uv run lockwatch scan --id <id> --check       :: 照合はせず、前回の結�
 uv run lockwatch report --new                 :: 前回から新しく出たもの
 uv run lockwatch report --hide unmaintained   :: 保守されていないだけの知らせを消して表示（重ねて書ける）
 uv run lockwatch report --html                :: リポジトリごとの診断書（HTML）を data\reports\ に書く（一覧は index.html。ブラウザで絞り込み・並べ替えができる）
+uv run lockwatch packages lodash              :: 全依存の台帳を引く（どのリポジトリが lodash のどの版を使っているか。照合はしない）
+uv run lockwatch packages "@babel/*" --version 7.26.0   :: 名前に * ? を書ける。--version・--ecosystem・--id で絞れる。--json でも出せる
 uv run lockwatch db-update                    :: 脆弱性 DB を取り直す
 uv run lockwatch status                       :: 使える状態か（osv-scanner・受け渡し・最後の照合・定期実行）
 uv run lockwatch targets check targets.json   :: 受け渡しのファイルを検査し、オンライン・手元の振り分けを表示
@@ -75,6 +78,10 @@ uv run lockwatch config show
 
 - 設定はこのフォルダの `lockwatch.json`（無ければ既定値。見本は `lockwatch.sample.json`）。結果などは `data\` に置く
 - 手元の脆弱性 DB は初回に取る（使う生態系の分だけ。npm だけで約 200 MB）。その後は 7 日ごとに取り直す
+- 悪意あるコードとして報告されたパッケージ（OSV の `MAL-` の記録）は、深刻度を「緊急」にして `[malicious]`（画面と診断書では「悪意あるコード」）の印を付ける。
+  手元の DB にも入っているので、非公開のリポジトリでも検出する
+- 照合のたびに、脆弱性の無いものも含めた全依存の台帳（`data\results\packages.json`）を書く。「この版が侵害された」という知らせが出たときに、
+  `lockwatch packages <名前> --version <版>` で、使っているリポジトリをその場で引ける。非公開のリポジトリの依存の一覧を含むので、外に出さない
 - 結果（`data\results\latest.json`）の形と、RepoTether との受け渡しの約束は [docs/design.md](docs/design.md) §3
 
 ## 定期実行

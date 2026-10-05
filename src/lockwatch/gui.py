@@ -1,4 +1,4 @@
-"""lockwatch gui: 状態・結果・設定の画面（docs/design.md §9）
+"""lockwatch gui: 状態・結果・台帳・設定の画面（docs/design.md §9）
 
 tkinter で作る（実行時の依存を足さない）。グローバルの CLAUDE.md にある tkinter の落とし穴の対策:
   - タブは選ばれたものがはっきり分かるスタイル（ensure_notebook_style）
@@ -21,6 +21,7 @@ from tkinter import filedialog, ttk
 from . import __version__
 from . import config as cfgmod
 from . import fold, store
+from . import packages as pkgmod
 from . import status as statusmod
 from .paths import app_dir, data_dir, targets_path
 
@@ -28,6 +29,8 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 SEVERITY_LABEL = {"critical": "緊急", "high": "高", "medium": "中", "low": "低", "unknown": "不明"}
 INFORMATIONAL_LABEL = {"unmaintained": "保守終了", "unsound": "安全性の欠陥", "notice": "お知らせ"}
+MALICIOUS_LABEL = "悪意あるコード"
+PACKAGE_ROWS_MAX = 2000   # 台帳のタブに出す行の上限（件数は全部を数える）
 
 # 設定の項目: (キー, 表示名, 種類, 説明)。種類は dir / file / bool / int
 CONFIG_FIELDS = [
@@ -61,6 +64,7 @@ def ensure_notebook_style(name: str = "LockWatch.TNotebook") -> str:
 
 def result_rows(latest: dict | None, hide: set[str], new_only: bool, text: str) -> list[tuple]:
     """結果のタブの行: (repo, package, version, severity, id, fixed, informational, lockfile)。重い順。
+    悪意あるコード（design.md §3.3 の malicious）は、informational の位置に "malicious" を入れる。
     hide は深刻度か知らせの種類。text はリポジトリ・パッケージ・ID の部分一致（大文字小文字を区別しない）"""
     if not latest:
         return []
@@ -77,9 +81,21 @@ def result_rows(latest: dict | None, hide: set[str], new_only: bool, text: str) 
             if needle and not any(needle in str(x).lower() for x in (rid, f.get("package"), f.get("id"))):
                 continue
             rows.append((rid, f.get("package", ""), f.get("version", ""), f.get("severity", "unknown"), f.get("id", ""),
-                         ", ".join(f.get("fixed") or []), f.get("informational") or "", f.get("lockfile", "")))
+                         ", ".join(f.get("fixed") or []), "malicious" if f.get("malicious") else f.get("informational") or "",
+                         f.get("lockfile", "")))
     rows.sort(key=lambda r: (order.get(r[3], 99), r[0], r[1], r[4]))
     return rows
+
+
+def package_rows(inventory: dict, name: str, version: str) -> tuple[list[tuple] | None, int]:
+    """台帳のタブの行: ([(package, version, ecosystem, repo, lockfile), ...], リポジトリの数)。
+    名前も版も空なら (None, 0)（全件は多すぎるので出さない）。名前は部分一致（* ? を書けば全体の一致）"""
+    pattern, ver = pkgmod.contains(name), version.strip() or None
+    if pattern is None and ver is None:
+        return None, 0
+    hits = pkgmod.hits(pkgmod.select(inventory, name=pattern, version=ver))
+    return ([(h["package"], h["version"], h["ecosystem"], h["repo"], h["lockfile"]) for h in hits],
+            len({h["repo"] for h in hits}))
 
 
 def status_lines(s: dict) -> list[tuple[str, str]]:
@@ -119,6 +135,7 @@ class App:
         self.jobs: queue.Queue = queue.Queue()
         self.running = False
         self.latest: dict | None = None
+        self.inventory: dict | None = None   # 全依存の台帳（packages.json）
 
         root.title(f"LockWatch {__version__}")
         root.geometry("1000x640")
@@ -137,6 +154,7 @@ class App:
         self.notebook = nb
         self._build_status(nb)
         self._build_results(nb)
+        self._build_packages(nb)
         self._build_settings(nb)
 
         self._after = self.root.after(100, self._poll)
@@ -339,7 +357,8 @@ class App:
         rows = result_rows(self.latest, hide, self.new_only.get(), self.search.get())
         self.tree.delete(*self.tree.get_children())
         for r in rows:
-            shown = (*r[:3], SEVERITY_LABEL.get(r[3], r[3]), r[4], r[5], INFORMATIONAL_LABEL.get(r[6], r[6]), r[7])
+            info = MALICIOUS_LABEL if r[6] == "malicious" else INFORMATIONAL_LABEL.get(r[6], r[6])
+            shown = (*r[:3], SEVERITY_LABEL.get(r[3], r[3]), r[4], r[5], info, r[7])
             self.tree.insert("", tk.END, values=shown)
         if self.latest is None:
             self.result_count.config(text=f"結果がまだありません ({self.data / 'results' / 'latest.json'})。「状態」の「全体を照合」で作れます")
@@ -364,6 +383,59 @@ class App:
         if sel:
             vid = self.tree.item(sel[0], "values")[4]
             webbrowser.open(f"https://osv.dev/vulnerability/{vid}")
+
+    # ---- 台帳のタブ
+
+    def _build_packages(self, nb: ttk.Notebook) -> None:
+        tab = ttk.Frame(nb, padding=10)
+        nb.add(tab, text="台帳")
+
+        query = ttk.Frame(tab)
+        query.pack(side=tk.TOP, fill=tk.X)
+        self.package_name = tk.StringVar()
+        self.package_version = tk.StringVar()
+        ttk.Label(query, text="パッケージ").pack(side=tk.LEFT)
+        ttk.Entry(query, textvariable=self.package_name, width=32).pack(side=tk.LEFT, padx=(4, 16))
+        ttk.Label(query, text="版").pack(side=tk.LEFT)
+        ttk.Entry(query, textvariable=self.package_version, width=14).pack(side=tk.LEFT, padx=(4, 16))
+        ttk.Label(query, text="名前は部分一致 (* ? を書くと全体の一致)。版は同じものだけ").pack(side=tk.LEFT)
+        for var in (self.package_name, self.package_version):
+            var.trace_add("write", lambda *_: self.show_packages())
+
+        # 件数の行を、表より先に下に置く
+        self.package_count = ttk.Label(tab, text="")
+        self.package_count.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+
+        table = ttk.Frame(tab)
+        table.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(8, 0))
+        cols = [("package", "パッケージ", 200), ("version", "版", 100), ("ecosystem", "生態系", 80),
+                ("repo", "リポジトリ", 280), ("lockfile", "lock ファイル", 200)]
+        self.package_tree = ttk.Treeview(table, columns=[c[0] for c in cols], show="headings")
+        for key, label, width in cols:
+            self.package_tree.heading(key, text=label)
+            self.package_tree.column(key, width=width, stretch=key in ("repo", "lockfile"))
+        scroll = ttk.Scrollbar(table, orient=tk.VERTICAL, command=self.package_tree.yview)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.package_tree.configure(yscrollcommand=scroll.set)
+        self.package_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    def show_packages(self) -> None:
+        self.package_tree.delete(*self.package_tree.get_children())
+        if self.inventory is None:
+            self.package_count.config(text=f"台帳がまだありません ({store.packages_path(self.data)})。「状態」の「全体を照合」で作れます")
+            return
+        when = pkgmod.scanned(self.inventory["repos"])
+        total = sum(len(e.get("packages") or []) for e in self.inventory["repos"].values())
+        rows, n_repos = package_rows(self.inventory, self.package_name.get(), self.package_version.get())
+        if rows is None:
+            self.package_count.config(
+                text=f"{len(self.inventory['repos'])} リポジトリ・{total} 件の台帳 (照合 {when})。パッケージの名前か版を入れてください")
+            return
+        for r in rows[:PACKAGE_ROWS_MAX]:
+            self.package_tree.insert("", tk.END, values=r)
+        cut = f"。先頭の {PACKAGE_ROWS_MAX} 件だけを表示" if len(rows) > PACKAGE_ROWS_MAX else ""
+        found = f"{len(rows)} 件 ({n_repos} リポジトリ){cut}" if rows else "使っているリポジトリはありません"
+        self.package_count.config(text=f"{found}。台帳は照合 {when} のもの")
 
     # ---- 設定のタブ
 
@@ -438,6 +510,8 @@ class App:
         """状態と結果を読み直す。状態は osv-scanner の --version などで 1 秒ほどかかるので裏で"""
         self.latest = store.load_latest(self.data)
         self.show_results()
+        self.inventory = store.load_packages(self.data)
+        self.show_packages()
         cfg, data, targets = dict(self.cfg), self.data, self.targets
         self._run_in_background("", lambda: statusmod.collect(cfg, data, targets), self._show_status)
 

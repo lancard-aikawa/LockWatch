@@ -34,6 +34,7 @@ class Job:
 @dataclass
 class Outcome:
     repos: dict[str, dict]                     # targets の順
+    packages: dict[str, list[list[str]]]       # 全依存の台帳（design.md §3.4）。ok のリポジトリだけ
     db_downloaded_at: str | None               # 手元の DB で照合したときの、使った DB の一番古い取得時刻
     scanner_failed: bool                       # osv-scanner が 1 回でも失敗した
     warnings: list[str]
@@ -69,11 +70,16 @@ def _entry(job: Job, at: datetime | str, status: str, findings: list[dict], erro
     return e
 
 
-def _assign(jobs: list[Job], data: dict) -> tuple[dict[str, list[dict]], list[str]]:
-    """osv-scanner の結果を source.path でリポジトリに振り分ける"""
+def _assign(jobs: list[Job], data: dict) -> tuple[dict[str, list[dict]], dict[str, list[list[str]]], list[str]]:
+    """osv-scanner の結果を source.path でリポジトリに振り分ける。(findings, 全パッケージ, 注意) を返す"""
     where = {fold.path_key(job.root / rel): (job.target.id, rel) for job in jobs for rel in job.lockfiles}
     out: dict[str, list[dict]] = {job.target.id: [] for job in jobs}
+    packages: dict[str, set[tuple[str, str, str, str]]] = {job.target.id: set() for job in jobs}
     warnings = []
+    for key, found in fold.packages_by_source(data).items():
+        hit = where.get(key)
+        if hit is not None:  # 分からないものは下の findings の側で知らせる
+            packages[hit[0]].update((hit[1], *p) for p in found)
     for key, found in fold.by_source(data).items():
         hit = where.get(key)
         if hit is None:
@@ -83,7 +89,8 @@ def _assign(jobs: list[Job], data: dict) -> tuple[dict[str, list[dict]], list[st
         for f in found:
             f["lockfile"] = rel
         out[rid].extend(found)
-    return {rid: fold.dedupe(fs) for rid, fs in out.items()}, warnings
+    return ({rid: fold.dedupe(fs) for rid, fs in out.items()},
+            {rid: [list(p) for p in sorted(ps)] for rid, ps in packages.items()}, warnings)
 
 
 def _jobs(targets: list[Target], cfg: dict) -> list[Job]:
@@ -123,6 +130,7 @@ def run(targets: list[Target], *, data: Path, cfg: dict, exe: str, scanner_versi
     """use_cache が False なら、キャッシュを読まずに照合し直す（書くのはいつもどおり）"""
     jobs = _jobs(targets, cfg)
     entries: dict[str, dict] = {}
+    packages: dict[str, list[list[str]]] = {}
     warnings: list[str] = []
     failed = False
 
@@ -154,6 +162,7 @@ def run(targets: list[Target], *, data: Path, cfg: dict, exe: str, scanner_versi
             hit = None if download else cached(key_of(job, db_state))
             if hit is not None:
                 entries[job.target.id] = _entry(job, hit["saved_at"], "ok", hit["findings"])
+                packages[job.target.id] = hit["packages"]
             else:
                 batch.append(job)
         if batch:
@@ -172,12 +181,13 @@ def run(targets: list[Target], *, data: Path, cfg: dict, exe: str, scanner_versi
                     for job in batch:
                         entries[job.target.id] = _entry(job, at, "no-lockfile", [])
                 else:
-                    found, w = _assign(batch, res.data)
+                    found, pkgs, w = _assign(batch, res.data)
                     warnings += w
                     for job in batch:
                         entries[job.target.id] = _entry(job, at, "ok", found[job.target.id])
+                        packages[job.target.id] = pkgs[job.target.id]
                         # 取り直した DB の時刻で鍵を作る
-                        store.cache_put(data, key_of(job, db_state), found[job.target.id], at)
+                        store.cache_put(data, key_of(job, db_state), found[job.target.id], pkgs[job.target.id], at)
 
     # ---- オンライン（リポジトリごと、並列）
     online_jobs = []
@@ -186,6 +196,7 @@ def run(targets: list[Target], *, data: Path, cfg: dict, exe: str, scanner_versi
         hit = cached(k)
         if hit is not None:
             entries[job.target.id] = _entry(job, hit["saved_at"], "ok", hit["findings"])
+            packages[job.target.id] = hit["packages"]
         else:
             online_jobs.append((job, k))
 
@@ -206,12 +217,14 @@ def run(targets: list[Target], *, data: Path, cfg: dict, exe: str, scanner_versi
                 elif res.nothing:
                     entries[job.target.id] = _entry(job, at, "no-lockfile", [])
                 else:
-                    found, w = _assign([job], res.data)
+                    found, pkgs, w = _assign([job], res.data)
                     warnings += w
                     entries[job.target.id] = _entry(job, at, "ok", found[job.target.id])
-                    store.cache_put(data, k, found[job.target.id], at)
+                    packages[job.target.id] = pkgs[job.target.id]
+                    store.cache_put(data, k, found[job.target.id], pkgs[job.target.id], at)
 
     times = [t for t in (store.parse_time(db_state.get(e)) for e in db_used) if t is not None]
     return Outcome(repos={j.target.id: entries[j.target.id] for j in jobs},
+                   packages={j.target.id: packages[j.target.id] for j in jobs if j.target.id in packages},
                    db_downloaded_at=store.iso(min(times)) if times else None,
                    scanner_failed=failed, warnings=warnings)

@@ -18,6 +18,7 @@ _GENERATOR_MARK = '<meta name="generator" content="LockWatch'
 
 SEVERITY_LABEL = {"critical": "緊急", "high": "高", "medium": "中", "low": "低", "unknown": "不明"}
 INFORMATIONAL_LABEL = {"unmaintained": "保守終了", "unsound": "安全性の欠陥", "notice": "お知らせ"}
+MALICIOUS_LABEL = "悪意あるコード"
 VISIBILITY_LABEL = {"public": "公開", "private": "非公開", "unknown": "公開か不明"}
 STATUS_LABEL = {"ok": "照合済み", "no-lockfile": "lock ファイルなし", "error": "照合できず"}
 
@@ -97,6 +98,8 @@ td.num { text-align: right; white-space: nowrap; }
 .sev.low { background: var(--low); } .sev.unknown { background: var(--unknown); }
 .tag { display: inline-block; border: 1px solid var(--muted); color: var(--muted); border-radius: 4px; padding: 0 4px; font-size: 12px; white-space: nowrap; }
 .tag.new { border-color: var(--high); color: var(--high); font-weight: bold; }
+.tag.mal { border-color: var(--critical); background: var(--critical); color: #fff; font-weight: bold; }
+p.mal { color: var(--critical); font-weight: bold; }
 .mono { font-family: Consolas, "BIZ UDGothic", monospace; font-size: 12px; }
 .path { word-break: break-all; }
 .nowrap { white-space: nowrap; }
@@ -271,7 +274,11 @@ def render_repo(rid: str, entry: dict, latest: dict, *, new_ids: set[tuple[str, 
     else:
         n_new = sum(1 for f in findings if (f.get("package"), f.get("id")) in new_ids)
         n_fixed = sum(1 for f in findings if f.get("fixed"))
+        n_mal = sum(1 for f in findings if f.get("malicious"))
         out.append("<h2>要約</h2>")
+        if n_mal:
+            out.append(f'<p class="mal">悪意あるコードとして報告されたパッケージが {n_mal} 件あります。'
+                       "その版を入れた環境は、侵害されたものとして扱ってください。</p>")
         if findings:
             out.append(f"<p>{len(findings)} 件の脆弱性・知らせが見つかりました。</p>")
         else:
@@ -304,6 +311,8 @@ def _findings_table(findings: list[dict], new_ids: set[tuple[str, str]]) -> str:
         tags = []
         if (f.get("package"), vid) in new_ids:
             tags.append('<span class="tag new">新規</span>')
+        if f.get("malicious"):
+            tags.append(f'<span class="tag mal">{MALICIOUS_LABEL}</span>')
         if f.get("informational"):
             tags.append(f'<span class="tag">{_e(INFORMATIONAL_LABEL.get(f["informational"], f["informational"]))}</span>')
         fixed = ", ".join(f.get("fixed") or [])

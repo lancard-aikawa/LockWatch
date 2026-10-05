@@ -1,0 +1,47 @@
+{
+  "results": [
+    {
+      "source": {"path": "@/pub/pnpm-lock.yaml", "type": "lockfile"},
+      "packages": [
+        {
+          "package": {"name": "evil-pkg", "version": "9.9.9", "ecosystem": "npm"},
+          "groups": [{"ids": ["MAL-2026-0001"], "aliases": ["GHSA-mmmm-mmmm-mmmm", "MAL-2026-0001"], "max_severity": ""}],
+          "vulnerabilities": [
+            {"id": "MAL-2026-0001", "aliases": ["GHSA-mmmm-mmmm-mmmm"], "summary": "Malicious code in evil-pkg (npm)",
+             "details": "long text that must not be copied",
+             "database_specific": {"malicious-packages-origins": [{"source": "ossf-package-analysis", "versions": ["9.9.9"]}]},
+             "affected": [{"package": {"ecosystem": "npm", "name": "evil-pkg"}, "versions": ["9.9.9"],
+              "database_specific": {"cwes": [{"cweId": "CWE-506", "name": "Embedded Malicious Code"}]}}]}
+          ]
+        },
+        {"package": {"name": "esbuild", "version": "0.21.5", "ecosystem": "npm"}},
+        {"package": {"name": "esbuild", "version": "0.24.0", "ecosystem": "npm"}},
+        {"package": {"name": "esbuild", "version": "0.24.0", "ecosystem": "npm"}},
+        {
+          "package": {"name": "vite", "version": "6.0.1", "ecosystem": "npm"},
+          "groups": [{"ids": ["GHSA-aaaa-aaaa-aaaa"], "aliases": ["CVE-2026-0001", "GHSA-aaaa-aaaa-aaaa"], "max_severity": "7.5"}],
+          "vulnerabilities": [
+            {"id": "GHSA-aaaa-aaaa-aaaa", "summary": "vite serves files outside the root",
+             "database_specific": {"severity": "MODERATE"},
+             "affected": [{"package": {"ecosystem": "npm", "name": "vite"},
+              "ranges": [{"type": "SEMVER", "events": [{"introduced": "6.0.0"}, {"fixed": "6.0.9"}]}]}]}
+          ]
+        }
+      ]
+    },
+    {
+      "source": {"path": "@/priv/uv.lock", "type": "lockfile"},
+      "packages": [
+        {"package": {"name": "Requests", "version": "2.32.0", "ecosystem": "PyPI"}},
+        {"package": {"name": "certifi", "version": "2024.8.30", "ecosystem": "PyPI"}}
+      ]
+    },
+    {
+      "source": {"path": "@/unk/sub/requirements-dev.txt", "type": "lockfile"},
+      "packages": [
+        {"package": {"name": "esbuild", "version": "0.24.0", "ecosystem": "PyPI"}}
+      ]
+    }
+  ],
+  "experimental_config": {"licenses": {"allowlist": null}}
+}

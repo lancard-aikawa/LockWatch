@@ -9,6 +9,7 @@ from pathlib import Path
 from . import __version__
 from . import config as cfgmod
 from . import fold, htmlreport, osv, store
+from . import packages as pkgmod
 from . import scan as scanmod
 from . import status as statusmod
 from . import targets as targetsmod
@@ -46,9 +47,16 @@ def _build_parser() -> argparse.ArgumentParser:
     r.add_argument("--html", action="store_true", help="リポジトリごとの診断書（HTML）と一覧（index.html）を書く")
     r.add_argument("--out", help="診断書を書くフォルダ（既定: <data>/reports）")
 
+    k = sub.add_parser("packages", help="全依存の台帳を引く（どのリポジトリが、そのパッケージのどの版を使っているか）")
+    k.add_argument("name", nargs="?", help="パッケージの名前（大文字小文字は区別しない。* ? を書ける）。省略するとリポジトリごとの件数")
+    k.add_argument("--version", dest="pkg_version", metavar="VERSION", help="この版だけ")
+    k.add_argument("--ecosystem", help="この生態系だけ（npm・PyPI・crates.io など）")
+    k.add_argument("--id", help="このリポジトリだけ")
+    k.add_argument("--json", action="store_true", help="JSON で出す")
+
     sub.add_parser("db-update", help="脆弱性 DB を取り直す")
 
-    sub.add_parser("gui", help="状態・結果・設定の画面を開く（pythonw -m lockwatch gui なら黒い窓が出ない）")
+    sub.add_parser("gui", help="状態・結果・台帳・設定の画面を開く（pythonw -m lockwatch gui なら黒い窓が出ない）")
 
     st = sub.add_parser("status", help="使える状態か（osv-scanner・受け渡し・最後の照合・定期実行）を表示する")
     st.add_argument("--json", action="store_true", help="JSON で出す")
@@ -121,11 +129,16 @@ def _counts(findings: list[dict]) -> str:
     return " / ".join(f"{s} {n[s]}" for s in fold.SEVERITIES if n[s])
 
 
+def _note(f: dict) -> str:
+    """悪意あるコード・知らせの種類の印"""
+    return ("  [malicious]" if f.get("malicious") else "") + (f"  [{f['informational']}]" if f.get("informational") else "")
+
+
 def _print_findings(findings: list[dict]) -> None:
     order = {s: i for i, s in enumerate(fold.SEVERITIES)}
     for f in sorted(findings, key=lambda f: (order.get(f["severity"], 99), f["package"], f["id"])):
         fixed = ", ".join(f["fixed"]) or "-"
-        note = f"  [{f['informational']}]" if f.get("informational") else ""
+        note = _note(f)
         print(f"  {f['severity']:<8} {f['package']} {f['version']}  {f['id']}{note}  直る版 {fixed}  （{f['lockfile']}）")
 
 
@@ -141,7 +154,7 @@ def _print_repo(rid: str, e: dict) -> None:
 
 def _print_new(new: list[dict]) -> None:
     for n in new:
-        note = f"  [{n['informational']}]" if n.get("informational") else ""
+        note = _note(n)
         print(f"  {n['severity']:<8} {n['repo']}  {n['package']}  {n['id']}{note}")
 
 
@@ -303,6 +316,38 @@ def _write_html(args, cfg: dict, data: Path, latest: dict, repos: dict, new: lis
     return EXIT_OK
 
 
+def _cmd_packages(args, cfg: dict) -> int:
+    """全依存の台帳を引く（design.md §7）。照合はしない"""
+    data = data_dir(args.data, cfg["data_dir"])
+    doc = store.load_packages(data)
+    if doc is None:
+        print(f"台帳がまだありません: {store.packages_path(data)}（先に scan）", file=sys.stderr)
+        return EXIT_USAGE
+    if args.id and args.id not in doc["repos"]:
+        print(f"台帳にありません: {args.id}", file=sys.stderr)
+        return EXIT_USAGE
+    repos = pkgmod.select(doc, name=args.name, version=args.pkg_version, ecosystem=args.ecosystem, only_id=args.id)
+    hits = pkgmod.hits(repos)
+
+    if args.json:
+        if args.name:
+            print(json.dumps(hits, ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps({**doc, "repos": repos}, ensure_ascii=False))
+        return EXIT_OK
+
+    print(f"台帳: {store.packages_path(data)}（照合 {pkgmod.scanned(repos)}）")
+    if not args.name:
+        for rid, e in repos.items():
+            print(f"{len(e['packages']):>7}  {rid}")
+        print(f"{len(hits)} 件（{len(repos)} リポジトリ）")
+        return EXIT_OK
+    for h in hits:
+        print(f"  {h['package']} {h['version']}  {h['ecosystem']}  {h['repo']}  （{h['lockfile']}）")
+    print(f"{len(hits)} 件（{len({h['repo'] for h in hits})} リポジトリ）" if hits else "使っているリポジトリはありません")
+    return EXIT_OK
+
+
 def _cmd_db_update(args, cfg: dict) -> int:
     """手元の DB で照合するリポジトリを、取り直し付きで 1 回照合する（design.md §5.3）。results/ は書かない"""
     data = data_dir(args.data, cfg["data_dir"])
@@ -333,7 +378,20 @@ def _cmd_db_update(args, cfg: dict) -> int:
     return EXIT_OK
 
 
+def _write_packages(data: Path, out, only_id: str | None) -> None:
+    """全依存の台帳（design.md §3.4）。--id なら、そのリポジトリの分だけ差し替える"""
+    prev = store.load_packages(data) if only_id else None
+    repos = dict(prev["repos"]) if prev else {}
+    for rid, e in out.repos.items():
+        if rid in out.packages:
+            repos[rid] = {"scanned_at": e["scanned_at"], "packages": out.packages[rid]}
+        else:
+            repos.pop(rid, None)  # ok でなくなったものの古い台帳を残さない
+    store.write_packages(data, repos)
+
+
 def _write_scan_results(data: Path, cfg: dict, out, ver: str, at, only_id: str | None) -> None:
+    _write_packages(data, out, only_id)
     prev = store.load_latest(data)
     if only_id and prev is not None:
         # latest.json のそのリポジトリだけ差し替える。過去の結果は書かない（design.md §7）
@@ -400,6 +458,8 @@ def _dispatch(args, config_path: Path, cfg: dict) -> int:
         return _cmd_scan(args, cfg)
     if args.command == "report":
         return _cmd_report(args, cfg)
+    if args.command == "packages":
+        return _cmd_packages(args, cfg)
     if args.command == "status":
         return _cmd_status(args, cfg)
     if args.command == "gui":

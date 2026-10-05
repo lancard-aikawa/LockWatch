@@ -33,12 +33,12 @@ def parse_time(s) -> datetime | None:
         return None
 
 
-def write_json(path: Path, obj) -> None:
+def write_json(path: Path, obj, indent: int | None = 2) -> None:
     """一時ファイルに書いてから入れ替える（読む側に書きかけを見せない）"""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
+        json.dump(obj, f, ensure_ascii=False, indent=indent)
         f.write("\n")
     os.replace(tmp, path)
 
@@ -114,13 +114,16 @@ def cache_get(data: Path, key: str, max_age_hours: int, at: datetime) -> dict | 
     if not isinstance(obj, dict) or obj.get("key") != key:
         return None
     t = parse_time(obj.get("saved_at"))
-    if t is None or at - t > timedelta(hours=max_age_hours) or not isinstance(obj.get("findings"), list):
+    if t is None or at - t > timedelta(hours=max_age_hours):
+        return None
+    if not isinstance(obj.get("findings"), list) or not isinstance(obj.get("packages"), list):
         return None
     return obj
 
 
-def cache_put(data: Path, key: str, findings: list[dict], at: datetime) -> None:
-    write_json(data / "cache" / f"{key}.json", {"key": key, "saved_at": iso(at), "findings": findings})
+def cache_put(data: Path, key: str, findings: list[dict], packages: list[list[str]], at: datetime) -> None:
+    write_json(data / "cache" / f"{key}.json", {"key": key, "saved_at": iso(at), "findings": findings, "packages": packages},
+               indent=None)
 
 
 def cache_prune(data: Path, max_age_hours: int, at: datetime) -> None:
@@ -160,8 +163,24 @@ def new_findings(prev: dict | None, repos: dict[str, dict]) -> list[dict]:
             if k not in known and k not in seen:
                 seen.add(k)
                 out.append({"repo": rid, "package": f["package"], "id": f["id"], "severity": f["severity"],
-                            "informational": f.get("informational")})
+                            "informational": f.get("informational"), "malicious": bool(f.get("malicious"))})
     return out
+
+
+# ---- 全依存の台帳（§3.4）
+
+def packages_path(data: Path) -> Path:
+    return results_dir(data) / "packages.json"
+
+
+def load_packages(data: Path) -> dict | None:
+    obj = read_json(packages_path(data))
+    return obj if isinstance(obj, dict) and isinstance(obj.get("repos"), dict) else None
+
+
+def write_packages(data: Path, repos: dict[str, dict]) -> None:
+    """repos は {id: {"scanned_at", "packages": [[lock ファイル, 生態系, 名前, 版], ...]}}。字下げなしで書く（大きいため）"""
+    write_json(packages_path(data), {"format": FORMAT, "repos": repos}, indent=None)
 
 
 def write_results(data: Path, doc: dict, at: datetime, history: bool, keep: int) -> None:

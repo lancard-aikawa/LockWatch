@@ -28,6 +28,18 @@ LATEST = {
 }
 
 
+INVENTORY = {
+    "format": 1,
+    "repos": {
+        "github.com/example/web-app": {"scanned_at": "2026-10-02T09:00:00+09:00", "packages": [
+            ["pnpm-lock.yaml", "npm", "esbuild", "0.21.5"], ["pnpm-lock.yaml", "npm", "esbuild", "0.24.0"],
+            ["pnpm-lock.yaml", "npm", "vite", "6.0.1"]]},
+        "local:C:/Repos/tool": {"scanned_at": "2026-10-03T09:00:00+09:00", "packages": [
+            ["Cargo.lock", "crates.io", "serde", "1.0.210"], ["package-lock.json", "npm", "esbuild", "0.24.0"]]},
+    },
+}
+
+
 class RowsTest(unittest.TestCase):
     def test_heaviest_first_and_filters(self):
         rows = gui.result_rows(LATEST, set(), False, "")
@@ -38,6 +50,25 @@ class RowsTest(unittest.TestCase):
         self.assertEqual([r[1] for r in gui.result_rows(LATEST, set(), True, "")], ["unic-common"])
         self.assertEqual([r[1] for r in gui.result_rows(LATEST, set(), False, "WEB-APP")], ["urllib3", "requests"])
         self.assertEqual(gui.result_rows(None, set(), False, ""), [])
+
+    def test_malicious_is_shown_in_the_notice_column(self):
+        mal = {**finding("evil-pkg", "MAL-2026-1", "critical"), "malicious": True}
+        latest = {**LATEST, "repos": {"r": {"status": "ok", "mode": "offline", "lockfiles": ["uv.lock"], "findings": [mal]}}}
+        self.assertEqual([(r[1], r[3], r[6]) for r in gui.result_rows(latest, set(), False, "")], [("evil-pkg", "critical", "malicious")])
+        self.assertEqual(gui.result_rows(LATEST, set(), False, "")[0][6], "")  # malicious の無い古い結果も読める
+
+    def test_package_rows(self):
+        rows, n = gui.package_rows(INVENTORY, "ESB", "")  # 部分一致。大文字小文字は区別しない
+        self.assertEqual(rows, [("esbuild", "0.21.5", "npm", "github.com/example/web-app", "pnpm-lock.yaml"),
+                                ("esbuild", "0.24.0", "npm", "github.com/example/web-app", "pnpm-lock.yaml"),
+                                ("esbuild", "0.24.0", "npm", "local:C:/Repos/tool", "package-lock.json")])
+        self.assertEqual(n, 2)
+        self.assertEqual([r[0] for r in gui.package_rows(INVENTORY, "*build", " 0.24.0 ")[0]], ["esbuild", "esbuild"])
+        self.assertEqual(gui.package_rows(INVENTORY, "build", "")[0][0][0], "esbuild")
+        self.assertEqual(gui.package_rows(INVENTORY, "build*", "")[0], [])  # * ? を書いたら全体の一致
+        self.assertEqual([r[0] for r in gui.package_rows(INVENTORY, "", "1.0.210")[0]], ["serde"])  # 版だけでも引ける
+        self.assertEqual(gui.package_rows(INVENTORY, "left-pad", ""), ([], 0))
+        self.assertEqual(gui.package_rows(INVENTORY, "  ", ""), (None, 0))  # 何も入れなければ出さない
 
     def test_validate_uses_config_rules(self):
         good = {"online_public": "false", "data_dir": "", "targets": "", "osv_scanner": "C:/x/osv-scanner.exe",
@@ -64,6 +95,7 @@ class AppTest(unittest.TestCase):
         self.root.withdraw()
         self.tmp = tempfile.TemporaryDirectory()
         d = Path(self.tmp.name)
+        self.data = d / "data"
         self.config = d / "lockwatch.json"
         cfgmod.save(self.config, {**cfgmod.DEFAULTS, "osv_scanner": str(d / "nope.exe"), "future_key": 1})
         (d / "data" / "results").mkdir(parents=True)
@@ -95,6 +127,34 @@ class AppTest(unittest.TestCase):
         self.app.hide_vars["unmaintained"].set(True)
         self.app.show_results()
         self.assertEqual(len(self.app.tree.get_children()), 2)
+
+    def test_packages_tab(self):
+        tree, count = self.app.package_tree, self.app.package_count
+        self.assertIn("台帳がまだありません", count.cget("text"))
+        (self.data / "results" / "packages.json").write_text(json.dumps(INVENTORY), encoding="utf-8")
+        self.app.reload()
+        self.assertEqual(len(tree.get_children()), 0)  # 何も入れなければ出さない
+        self.assertIn("2 リポジトリ・5 件の台帳", count.cget("text"))
+        self.app.package_name.set("esbuild")
+        self.assertEqual(len(tree.get_children()), 3)
+        self.assertIn("3 件 (2 リポジトリ)", count.cget("text"))
+        self.assertIn("2026-10-02T09:00:00+09:00 〜 2026-10-03T09:00:00+09:00", count.cget("text"))
+        self.app.package_version.set("0.21.5")
+        self.assertEqual([tree.item(i, "values")[3] for i in tree.get_children()], ["github.com/example/web-app"])
+        self.app.package_name.set("left-pad")
+        self.assertIn("使っているリポジトリはありません", count.cget("text"))
+        with mock.patch.object(gui, "PACKAGE_ROWS_MAX", 2):
+            self.app.package_version.set("")
+            self.app.package_name.set("e")
+        self.assertEqual(len(tree.get_children()), 2)
+        self.assertIn("5 件 (2 リポジトリ)。先頭の 2 件だけを表示", count.cget("text"))  # e を含むのは esbuild 3・serde・vite
+        # 件数の行が窓の中に収まっている（下の行は表より先に置く）
+        self.app.notebook.select(2)
+        self.root.deiconify()
+        self.root.update()
+        self.assertLessEqual(count.winfo_rooty() + count.winfo_height(), self.root.winfo_rooty() + self.root.winfo_height())
+        self.assertEqual(self.app.notebook.tab(2, "text"), "台帳")
+        self.root.withdraw()
 
     def test_report_argv_passes_hide(self):
         self.app.hide_vars["unmaintained"].set(True)

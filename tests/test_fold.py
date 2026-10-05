@@ -35,8 +35,9 @@ class BySourceTest(unittest.TestCase):
     def test_finding_shape(self):
         f = self.one("pub/pnpm-lock.yaml")
         self.assertEqual(set(f), {"lockfile", "ecosystem", "package", "version", "id", "aliases",
-                                  "severity", "score", "fixed", "informational", "summary"})
+                                  "severity", "score", "fixed", "informational", "malicious", "summary"})
         self.assertIsNone(f["informational"])
+        self.assertIs(f["malicious"], False)
         self.assertEqual((f["package"], f["version"], f["ecosystem"]), ("vite", "6.0.1", "npm"))
         self.assertEqual(f["id"], "GHSA-aaaa-aaaa-aaaa")
         self.assertEqual(f["aliases"], ["CVE-2026-0001"])
@@ -71,6 +72,33 @@ class BySourceTest(unittest.TestCase):
         self.assertEqual(label("MODERATE"), "medium")
         self.assertIsNone(label())
         self.assertIsNone(fold._label([{"database_specific": None}, {}]))
+
+    def test_malicious_is_flagged_and_does_not_sink_to_unknown(self):
+        out = fold.by_source(load("osv_all.json"))
+        found = {f["package"]: f for f in out[fold.path_key("C:/r/pub/pnpm-lock.yaml")]}
+        self.assertEqual(set(found), {"evil-pkg", "vite"})  # 脆弱性の無い esbuild は findings に入れない
+        mal = found["evil-pkg"]
+        # MAL- には区分も点数も無い。unknown のままにせず critical にする（score は無いまま）
+        self.assertEqual((mal["malicious"], mal["severity"], mal["score"]), (True, "critical", None))
+        self.assertEqual((mal["id"], mal["aliases"], mal["fixed"]), ("MAL-2026-0001", ["GHSA-mmmm-mmmm-mmmm"], []))
+        self.assertEqual((found["vite"]["malicious"], found["vite"]["severity"]), (False, "medium"))
+        self.assertEqual(out[fold.path_key("C:/r/priv/uv.lock")], [])
+        self.assertNotIn("long text", json.dumps(out))
+
+    def test_malicious_is_found_by_alias_and_keeps_its_own_severity(self):
+        data = {"results": [{"source": {"path": "C:/r/x/package-lock.json"}, "packages": [{
+            "package": {"name": "p", "version": "1", "ecosystem": "npm"},
+            "groups": [{"ids": ["GHSA-x"], "aliases": ["GHSA-x", "MAL-2026-2"], "max_severity": "5.0"}],
+            "vulnerabilities": [{"id": "GHSA-x"}]}]}]}
+        (f,) = fold.by_source(data)[fold.path_key("C:/r/x/package-lock.json")]
+        self.assertEqual((f["malicious"], f["severity"], f["score"]), (True, "medium", 5.0))
+
+    def test_packages_by_source_lists_everything(self):
+        out = fold.packages_by_source(load("osv_all.json"))
+        self.assertEqual(out[fold.path_key("C:/r/priv/uv.lock")],
+                         [("PyPI", "Requests", "2.32.0"), ("PyPI", "certifi", "2024.8.30")])
+        self.assertIn(("npm", "evil-pkg", "9.9.9"), out[fold.path_key("C:/r/pub/pnpm-lock.yaml")])
+        self.assertIn(("npm", "esbuild", "0.21.5"), out[fold.path_key("C:/r/pub/pnpm-lock.yaml")])
 
     def test_details_are_not_copied(self):
         self.assertNotIn("long text", json.dumps(self.out))

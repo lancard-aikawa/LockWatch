@@ -67,7 +67,8 @@ def _run(exe: str, flags: tuple[str, ...], lockfiles: list[Path]) -> Outcome:
     out = Path(out_name)
     try:
         out.unlink()  # 128 のときは作られない。前の中身を読み違えないように消しておく
-        argv = [exe, "scan", "source", *flags, "--format", "json", "--output-file", str(out)]
+        # --all-packages: 脆弱性の無いパッケージも出す（全依存の台帳の元。design.md §3.4）
+        argv = [exe, "scan", "source", *flags, "--all-packages", "--format", "json", "--output-file", str(out)]
         for f in lockfiles:
             argv += ["-L", str(f)]
         try:
