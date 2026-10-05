@@ -1,4 +1,4 @@
-"""lockwatch gui: 状態・結果・台帳・設定の画面（docs/design.md §9）
+"""lockwatch gui: 状態・結果・台帳・注意・設定の画面（docs/design.md §9）
 
 tkinter で作る（実行時の依存を足さない）。グローバルの CLAUDE.md にある tkinter の落とし穴の対策:
   - タブは選ばれたものがはっきり分かるスタイル（ensure_notebook_style）
@@ -20,7 +20,7 @@ from tkinter import filedialog, ttk
 
 from . import __version__
 from . import config as cfgmod
-from . import fold, store
+from . import fold, hygiene, store
 from . import packages as pkgmod
 from . import status as statusmod
 from .paths import app_dir, data_dir, targets_path
@@ -84,6 +84,22 @@ def result_rows(latest: dict | None, hide: set[str], new_only: bool, text: str) 
                          ", ".join(f.get("fixed") or []), "malicious" if f.get("malicious") else f.get("informational") or "",
                          f.get("lockfile", "")))
     rows.sort(key=lambda r: (order.get(r[3], 99), r[0], r[1], r[4]))
+    return rows
+
+
+def notice_rows(latest: dict | None, hide: set[str], text: str) -> list[tuple]:
+    """注意のタブの行: (repo, kind, package, version, 詳細の文, lockfile)。latest.json の並びのまま。
+    hide は種類（design.md §3.5 の kind）。text はどの列でも部分一致（大文字小文字を区別しない）"""
+    needle = text.strip().lower()
+    rows = []
+    for rid, entry in ((latest or {}).get("repos") or {}).items():
+        for n in (entry or {}).get("notices") or []:
+            if n.get("kind") in hide:
+                continue
+            row = (rid, n.get("kind", ""), n.get("package", ""), n.get("version", ""), hygiene.describe(n), n.get("lockfile", ""))
+            if needle and not any(needle in str(x).lower() for x in row):
+                continue
+            rows.append(row)
     return rows
 
 
@@ -155,6 +171,7 @@ class App:
         self._build_status(nb)
         self._build_results(nb)
         self._build_packages(nb)
+        self._build_notices(nb)
         self._build_settings(nb)
 
         self._after = self.root.after(100, self._poll)
@@ -437,6 +454,54 @@ class App:
         found = f"{len(rows)} 件 ({n_repos} リポジトリ){cut}" if rows else "使っているリポジトリはありません"
         self.package_count.config(text=f"{found}。台帳は照合 {when} のもの")
 
+    # ---- 注意のタブ
+
+    def _build_notices(self, nb: ttk.Notebook) -> None:
+        tab = ttk.Frame(nb, padding=10)
+        nb.add(tab, text="注意")
+
+        filters = ttk.Frame(tab)
+        filters.pack(side=tk.TOP, fill=tk.X)
+        ttk.Label(filters, text="隠す:").pack(side=tk.LEFT)
+        self.notice_hide_vars: dict[str, tk.BooleanVar] = {}
+        for key, label in hygiene.KIND_LABEL.items():
+            v = tk.BooleanVar(value=False)
+            self.notice_hide_vars[key] = v
+            ttk.Checkbutton(filters, text=label, variable=v, command=self.show_notices).pack(side=tk.LEFT, padx=(4, 0))
+        self.notice_search = tk.StringVar()
+        self.notice_search.trace_add("write", lambda *_: self.show_notices())
+        ttk.Entry(filters, textvariable=self.notice_search, width=24).pack(side=tk.RIGHT)
+        ttk.Label(filters, text="絞り込み").pack(side=tk.RIGHT, padx=(0, 4))
+
+        # 件数の行を、表より先に下に置く
+        self.notice_count = ttk.Label(tab, text="")
+        self.notice_count.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+
+        table = ttk.Frame(tab)
+        table.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(8, 0))
+        cols = [("repo", "リポジトリ", 220), ("kind", "種類", 130), ("package", "パッケージ", 140), ("version", "版", 70),
+                ("detail", "詳細", 260), ("lockfile", "lock ファイル", 140)]
+        self.notice_tree = ttk.Treeview(table, columns=[c[0] for c in cols], show="headings")
+        for key, label, width in cols:
+            self.notice_tree.heading(key, text=label)
+            self.notice_tree.column(key, width=width, stretch=key in ("repo", "detail"))
+        scroll = ttk.Scrollbar(table, orient=tk.VERTICAL, command=self.notice_tree.yview)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.notice_tree.configure(yscrollcommand=scroll.set)
+        self.notice_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    def show_notices(self) -> None:
+        hide = {k for k, v in self.notice_hide_vars.items() if v.get()}
+        rows = notice_rows(self.latest, hide, self.notice_search.get())
+        self.notice_tree.delete(*self.notice_tree.get_children())
+        for r in rows:
+            self.notice_tree.insert("", tk.END, values=(r[0], hygiene.KIND_LABEL.get(r[1], r[1]), *r[2:]))
+        if self.latest is None:
+            self.notice_count.config(text="結果がまだありません")
+        else:
+            total = sum(len((e or {}).get("notices") or []) for e in self.latest.get("repos", {}).values())
+            self.notice_count.config(text=f"{len(rows)} 件を表示 (全体 {total} 件)。脆弱性の照合とは別に、lock ファイルを読んで分かったこと")
+
     # ---- 設定のタブ
 
     def _build_settings(self, nb: ttk.Notebook) -> None:
@@ -510,6 +575,7 @@ class App:
         """状態と結果を読み直す。状態は osv-scanner の --version などで 1 秒ほどかかるので裏で"""
         self.latest = store.load_latest(self.data)
         self.show_results()
+        self.show_notices()
         self.inventory = store.load_packages(self.data)
         self.show_packages()
         cfg, data, targets = dict(self.cfg), self.data, self.targets

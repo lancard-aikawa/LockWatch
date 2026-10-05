@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import __version__
 from . import config as cfgmod
-from . import fold, htmlreport, osv, store
+from . import fold, htmlreport, hygiene, osv, store
 from . import packages as pkgmod
 from . import scan as scanmod
 from . import status as statusmod
@@ -56,7 +56,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("db-update", help="脆弱性 DB を取り直す")
 
-    sub.add_parser("gui", help="状態・結果・台帳・設定の画面を開く（pythonw -m lockwatch gui なら黒い窓が出ない）")
+    sub.add_parser("gui", help="状態・結果・台帳・注意・設定の画面を開く（pythonw -m lockwatch gui なら黒い窓が出ない）")
 
     st = sub.add_parser("status", help="使える状態か（osv-scanner・受け渡し・最後の照合・定期実行）を表示する")
     st.add_argument("--json", action="store_true", help="JSON で出す")
@@ -142,9 +142,18 @@ def _print_findings(findings: list[dict]) -> None:
         print(f"  {f['severity']:<8} {f['package']} {f['version']}  {f['id']}{note}  直る版 {fixed}  （{f['lockfile']}）")
 
 
+def _print_notices(notices: list[dict]) -> None:
+    """lock ファイルの健全性の注意（design.md §3.5）"""
+    for n in notices:
+        name = " ".join(x for x in (n.get("package"), n.get("version")) if x) or "-"
+        print(f"  注意     {name}  {hygiene.describe(n)}  （{n.get('lockfile')}）")
+
+
 def _print_repo(rid: str, e: dict) -> None:
     if e["status"] == "ok":
         detail = f"{len(e['findings'])} 件" + (f"（{_counts(e['findings'])}）" if e["findings"] else "")
+        if e.get("notices"):
+            detail += f"、注意 {len(e['notices'])} 件"
     elif e["status"] == "error":
         detail = e.get("error", "")
     else:
@@ -230,6 +239,7 @@ def _cmd_scan(args, cfg: dict) -> int:
         _print_repo(rid, e)
         if args.repo:
             _print_findings(e["findings"])
+            _print_notices(e.get("notices") or [])
     if not args.repo:
         latest = store.load_latest(data) or {}
         new = [n for n in latest.get("new", []) if not args.id or n.get("repo") == args.id]
@@ -282,6 +292,7 @@ def _cmd_report(args, cfg: dict) -> int:
         for rid, e in repos.items():
             _print_repo(rid, e)
             _print_findings(e["findings"])
+            _print_notices(e.get("notices") or [])
         print(f"新しく出たもの: {len(new)} 件")
     if hide:
         print(f"（--hide {' '.join(sorted(hide))} で {n_hidden} 件を消しています）")

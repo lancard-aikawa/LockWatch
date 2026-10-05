@@ -3,7 +3,7 @@ name = "lockwatch"
 version = "0.2.0"
 description = "List vulnerabilities in the lock files of all your repositories with osv-scanner, keeping private ones offline"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = []
 
 [project.scripts]

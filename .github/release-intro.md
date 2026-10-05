@@ -2,7 +2,7 @@
 ## 入れ方・更新の仕方
 
 LockWatch は Python のソースのまま動かす道具なので、配るファイルはソースコードだけです（ビルドしたファイルはありません）。
-Windows 10 / 11、Python 3.10 以上、[uv](https://docs.astral.sh/uv/)、osv-scanner 2.6.0 が要ります。
+Windows 10 / 11、Python 3.11 以上、[uv](https://docs.astral.sh/uv/)、osv-scanner 2.6.0 が要ります。
 
 ```cmd
 winget install --id Google.OSVScanner --version 2.6.0 --exact

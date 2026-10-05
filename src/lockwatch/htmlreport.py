@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from . import __version__, fold, store
+from . import __version__, fold, hygiene, store
 
 GENERATOR = f"LockWatch {__version__}"
 _GENERATOR_MARK = '<meta name="generator" content="LockWatch'
@@ -294,6 +294,11 @@ def render_repo(rid: str, entry: dict, latest: dict, *, new_ids: set[tuple[str, 
                 [("new", "新規だけ"), ("fixed", "直る版があるものだけ")], "（重い順。見出しを押すと並べ替え）"))
             out.append(_findings_table(findings, new_ids))
 
+    notices = entry.get("notices") or []
+    if status == "ok" and notices:
+        out.append(f"<h2>lock ファイルの注意</h2>\n<p>脆弱性の照合とは別に、lock ファイルを読んで分かった {len(notices)} 件です。</p>")
+        out.append(_notices_table(notices))
+
     lockfiles = entry.get("lockfiles") or []
     if lockfiles:
         out.append("<h2>調べた lock ファイル</h2>\n<ul>" + "".join(f'<li class="mono path">{_e(p)}</li>' for p in lockfiles) + "</ul>")
@@ -337,6 +342,19 @@ def _findings_table(findings: list[dict], new_ids: set[tuple[str, str]]) -> str:
     return _table(head, rows)
 
 
+def _notices_table(notices: list[dict]) -> str:
+    """lock ファイルの健全性の注意（design.md §3.5）。絞り込みと並べ替えの対象にはしない（data-lw を付けない）"""
+    rows = [
+        f'<tr><td class="nowrap">{_e(hygiene.KIND_LABEL.get(n.get("kind"), n.get("kind")))}</td>'
+        f'<td class="nowrap"><span class="mono">{_e(n.get("package") or "-")}</span>'
+        + (f'<br><span class="muted mono">{_e(n.get("version"))}</span>' if n.get("version") else "") + "</td>"
+        f'<td>{_e(hygiene.describe(n))}</td><td class="mono path">{_e(n.get("lockfile"))}</td></tr>'
+        for n in notices
+    ]
+    head = "<tr><th>種類</th><th>パッケージ / 版</th><th>詳細</th><th>lock ファイル</th></tr>"
+    return f'<div class="scroll"><table>\n<thead>{head}</thead>\n<tbody>\n' + "\n".join(rows) + "\n</tbody>\n</table></div>"
+
+
 def _table(head: str, rows: list[str]) -> str:
     """狭い画面では表だけを横にスクロールさせる（ページ全体をはみ出させない）。data-lw は絞り込みと並べ替えの対象の印"""
     return f'<div class="scroll"><table data-lw>\n<thead>{head}</thead>\n<tbody>\n' + "\n".join(rows) + "\n</tbody>\n</table></div>"
@@ -355,10 +373,12 @@ def render_index(repos: dict[str, dict], latest: dict, names: dict[str, str], *,
         rows.append(
             f'<tr data-vis="{vis}" data-has="{int(bool(e.get("findings")))}">'
             f'<td><a class="mono path" href="{_e(quote(names[rid]))}.html">{_e(rid)}</a></td>'
-            f"<td>{_e(VISIBILITY_LABEL[vis])}</td><td>{_e(STATUS_LABEL.get(status, status))}</td>{cells}</tr>"
+            f"<td>{_e(VISIBILITY_LABEL[vis])}</td><td>{_e(STATUS_LABEL.get(status, status))}</td>{cells}"
+            f'<td class="num">{len(e.get("notices") or []) or "<span class=muted>0</span>"}</td></tr>'
         )
     head = ("<tr>" + _th("リポジトリ", "text") + _th("公開の区分", "text") + _th("状態", "text") + "".join(
-        _th(f'<span class="sev {s}">{SEVERITY_LABEL[s]}</span>', "num", "num") for s in fold.SEVERITIES) + "</tr>")
+        _th(f'<span class="sev {s}">{SEVERITY_LABEL[s]}</span>', "num", "num") for s in fold.SEVERITIES)
+        + _th("注意", "num", "num") + "</tr>")
     present = {visibility_of(e) for e in repos.values()}
     private = present != {"public"} and bool(present)
     body = [

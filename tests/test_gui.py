@@ -57,6 +57,19 @@ class RowsTest(unittest.TestCase):
         self.assertEqual([(r[1], r[3], r[6]) for r in gui.result_rows(latest, set(), False, "")], [("evil-pkg", "critical", "malicious")])
         self.assertEqual(gui.result_rows(LATEST, set(), False, "")[0][6], "")  # malicious の無い古い結果も読める
 
+    def test_notice_rows(self):
+        notices = [{"lockfile": "requirements.txt", "kind": "unpinned", "package": "jinja2", "version": "", "detail": ""},
+                   {"lockfile": "uv.lock", "kind": "recent", "package": "fresh", "version": "2.0.0", "detail": "2026-10-03T08:00:00Z"}]
+        latest = {**LATEST, "repos": {**LATEST["repos"], "r": {"status": "ok", "findings": [], "notices": notices}}}
+        rows = gui.notice_rows(latest, set(), "")
+        self.assertEqual([(r[0], r[1], r[2], r[3], r[5]) for r in rows],
+                         [("r", "unpinned", "jinja2", "", "requirements.txt"), ("r", "recent", "fresh", "2.0.0", "uv.lock")])
+        self.assertIn("照合されていません", rows[0][4])
+        self.assertEqual([r[2] for r in gui.notice_rows(latest, {"unpinned"}, "")], ["fresh"])
+        self.assertEqual([r[2] for r in gui.notice_rows(latest, set(), "UV.LOCK")], ["fresh"])
+        self.assertEqual(gui.notice_rows(LATEST, set(), ""), [])  # notices の無い古い結果
+        self.assertEqual(gui.notice_rows(None, set(), ""), [])
+
     def test_package_rows(self):
         rows, n = gui.package_rows(INVENTORY, "ESB", "")  # 部分一致。大文字小文字は区別しない
         self.assertEqual(rows, [("esbuild", "0.21.5", "npm", "github.com/example/web-app", "pnpm-lock.yaml"),
@@ -155,6 +168,21 @@ class AppTest(unittest.TestCase):
         self.assertLessEqual(count.winfo_rooty() + count.winfo_height(), self.root.winfo_rooty() + self.root.winfo_height())
         self.assertEqual(self.app.notebook.tab(2, "text"), "台帳")
         self.root.withdraw()
+
+    def test_notices_tab(self):
+        self.assertEqual([self.app.notebook.tab(i, "text") for i in self.app.notebook.tabs()], ["状態", "結果", "台帳", "注意", "設定"])
+        self.assertIn("0 件を表示 (全体 0 件)", self.app.notice_count.cget("text"))
+        notices = [{"lockfile": "requirements.txt", "kind": "unpinned", "package": "jinja2", "version": "", "detail": ""},
+                   {"lockfile": "uv.lock", "kind": "recent", "package": "fresh", "version": "2.0.0", "detail": "2026-10-03T08:00:00Z"}]
+        latest = {**LATEST, "repos": {"r": {"status": "ok", "mode": "offline", "lockfiles": [], "findings": [], "notices": notices}}}
+        (self.data / "results" / "latest.json").write_text(json.dumps(latest), encoding="utf-8")
+        self.app.reload()
+        tree = self.app.notice_tree
+        self.assertEqual([tree.item(i, "values")[1] for i in tree.get_children()], ["版を固定していない", "公開直後の版"])
+        self.app.notice_hide_vars["unpinned"].set(True)
+        self.app.show_notices()
+        self.assertEqual(len(tree.get_children()), 1)
+        self.assertIn("1 件を表示 (全体 2 件)", self.app.notice_count.cget("text"))
 
     def test_report_argv_passes_hide(self):
         self.app.hide_vars["unmaintained"].set(True)

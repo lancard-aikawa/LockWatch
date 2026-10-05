@@ -8,7 +8,7 @@
 # (cp932 on Japanese Windows), so non-ASCII text breaks the parser. pwsh (7) is not always installed.
 #
 # The task runs scripts\lockwatch-launch.py with a base interpreter's pythonw.exe found by
-# scripts\find-pythonw.ps1 (Python 3.10 or later; no .venv needed), so no console window opens.
+# scripts\find-pythonw.ps1 (Python 3.11 or later; no .venv needed), so no console window opens.
 # (.venv\Scripts\pythonw.exe made by uv 0.11 is a console launcher and opens one.) Check the result in <data>\last-run.log and the task's
 # "Last Run Result": 0 = done, 1 = LockWatch bug, 2 = usage (e.g. no targets.json), 3 = already running,
 # 4 = osv-scanner failed.

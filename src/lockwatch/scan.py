@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import fold, lockfiles, osv, store
+from . import fold, hygiene, lockfiles, osv, store
 from .targets import Target, split_by_privacy
 
 
@@ -64,7 +64,7 @@ def _prepare(t: Target, mode: str) -> Job:
 
 def _entry(job: Job, at: datetime | str, status: str, findings: list[dict], error: str | None = None) -> dict:
     """at はキャッシュから返すときは保存した時刻（照合した時刻）"""
-    e = {"status": status, "visibility": job.target.visibility, "mode": job.mode, "scanned_at": at if isinstance(at, str) else store.iso(at), "lockfiles": job.lockfiles, "findings": findings}
+    e = {"status": status, "visibility": job.target.visibility, "mode": job.mode, "scanned_at": at if isinstance(at, str) else store.iso(at), "lockfiles": job.lockfiles, "findings": findings, "notices": []}
     if error:
         e["error"] = error
     return e
@@ -222,6 +222,11 @@ def run(targets: list[Target], *, data: Path, cfg: dict, exe: str, scanner_versi
                     entries[job.target.id] = _entry(job, at, "ok", found[job.target.id])
                     packages[job.target.id] = pkgs[job.target.id]
                     store.cache_put(data, k, found[job.target.id], pkgs[job.target.id], at)
+
+    # lock ファイルの健全性の注意（design.md §3.5）。キャッシュには入れず、毎回読み直す
+    for job in todo:
+        if entries[job.target.id]["status"] == "ok":
+            entries[job.target.id]["notices"] = hygiene.check(job.root, job.lockfiles, at)
 
     times = [t for t in (store.parse_time(db_state.get(e)) for e in db_used) if t is not None]
     return Outcome(repos={j.target.id: entries[j.target.id] for j in jobs},

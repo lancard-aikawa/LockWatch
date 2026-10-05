@@ -8,7 +8,7 @@ setlocal
 set "PYW="
 for /f "usebackq delims=" %%p in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0find-pythonw.ps1" -Tk`) do set "PYW=%%p"
 if not defined PYW (
-  echo Python 3.10 or later with tkinter was not found.
+  echo Python 3.11 or later with tkinter was not found.
   echo Install it from https://www.python.org/ and run this again.
   pause
   exit /b 1

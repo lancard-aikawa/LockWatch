@@ -1,4 +1,4 @@
-# Print the full path of a pythonw.exe (Python 3.10 or later) that can run this repository.
+# Print the full path of a pythonw.exe (Python 3.11 or later) that can run this repository.
 # No .venv is needed: the program uses the standard library only.
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\find-pythonw.ps1 [-Tk]
 # Exit code 0 and the path on stdout, or exit code 1 and the reason on stderr.
@@ -20,7 +20,7 @@ if (Test-Path $cfg) {
     if ($homeLine) { $candidates.Add((Join-Path ($homeLine -replace '^\s*home\s*=\s*', '').Trim() "python.exe")) }
 }
 if (Get-Command uv -ErrorAction SilentlyContinue) {
-    $p = & uv python find --system ">=3.10" 2>$null
+    $p = & uv python find --system ">=3.11" 2>$null
     if ($LASTEXITCODE -eq 0 -and $p) { $candidates.Add(($p | Select-Object -First 1).Trim()) }
 }
 if (Get-Command py -ErrorAction SilentlyContinue) {
@@ -29,7 +29,7 @@ if (Get-Command py -ErrorAction SilentlyContinue) {
 }
 foreach ($c in @(Get-Command python.exe -All -ErrorAction SilentlyContinue)) { $candidates.Add($c.Source) }
 
-$probe = "import sys; assert sys.version_info >= (3, 10); print(sys.base_prefix)"
+$probe = "import sys; assert sys.version_info >= (3, 11); print(sys.base_prefix)"
 if ($Tk) { $probe = "import tkinter; " + $probe }
 $tried = @()
 foreach ($exe in $candidates) {
@@ -46,7 +46,7 @@ foreach ($exe in $candidates) {
         exit 0
     }
 }
-$need = if ($Tk) { "Python 3.10 or later with tkinter" } else { "Python 3.10 or later" }
+$need = if ($Tk) { "Python 3.11 or later with tkinter" } else { "Python 3.11 or later" }
 [Console]::Error.WriteLine("$need was not found. Install it from https://www.python.org/ (or 'uv python install'), then run this again.")
 if ($tried) { [Console]::Error.WriteLine("Tried: " + ($tried -join ", ")) }
 exit 1

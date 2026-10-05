@@ -4,6 +4,15 @@
 
 ## 未公開
 
+- **Python 3.11 以上が要る**（これまでは 3.10 以上）。`uv.lock` を読むのに標準ライブラリの `tomllib` を使うため
+- lock ファイルの健全性の「注意」を足す。脆弱性の照合とは別に lock ファイルそのものを読み、結果のリポジトリごとの `notices` に入れる（通信はしない）。
+  `lockwatch report`・診断書・画面の「注意」タブに出る
+  - 版を固定していない `requirements*.txt` の行。osv-scanner は `>=1.24.1` を 1.24.1 として照合し、版の指定が無い行は照合せずに 0 件とするため、
+    結果が当てにならないことを知らせる
+  - レジストリ以外（URL・git）から取るパッケージ（`requirements*.txt`・`package-lock.json`・`npm-shrinkwrap.json`・`uv.lock`）。URL の中の利用者名とパスワードは結果に残さない
+  - ハッシュ（`integrity`）の無いパッケージ（`package-lock.json`・`npm-shrinkwrap.json`。古い形式で 20 件を超えるファイルは 1 件にまとめる）
+  - 公開から 7 日たっていない版（`uv.lock`）
+  - `pnpm-lock.yaml`・`yarn.lock` は見ない
 - 悪意あるコードとして報告されたパッケージ（OSV の `MAL-` の記録）を見分ける。結果の各項目に `malicious` を足し、
   区分も点数も無いものは深刻度を `critical` にする（これまでは `unknown` で、一覧の一番下に沈んでいた）。
   表示では `[malicious]`、画面と診断書では「悪意あるコード」の印を付ける

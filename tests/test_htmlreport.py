@@ -102,6 +102,23 @@ class RenderTest(unittest.TestCase):
         self.assertIn("悪意あるコードとして報告されたパッケージが 1 件あります", page)
         self.assertNotIn("悪意あるコード", self.render("github.com/example/web-app"))  # malicious の無い古い結果
 
+    def test_notices_table(self):
+        entry = {"status": "ok", "visibility": "private", "mode": "offline", "lockfiles": ["requirements.txt"], "findings": [],
+                 "notices": [{"lockfile": "requirements.txt", "kind": "unpinned", "package": "<b>jinja2</b>", "version": "", "detail": ""},
+                             {"lockfile": "package-lock.json", "kind": "not-registry", "package": "forked", "version": "1.3.0",
+                              "detail": "git+ssh://github.com/x/forked.git#abc"}]}
+        page = htmlreport.render_repo("r", entry, LATEST, new_ids=set(), n_hidden=0, hide=set(), made_at=self.made_at)
+        self.assertIn("<h2>lock ファイルの注意</h2>", page)
+        self.assertIn("版の指定がありません。照合されていません", page)
+        self.assertIn("レジストリ以外から取得: git+ssh://github.com/x/forked.git#abc", page)
+        self.assertIn("&lt;b&gt;jinja2&lt;/b&gt;", page)
+        self.assertNotIn("<b>jinja2</b>", page)
+        self.assertEqual(page.count("<table data-lw>"), 0)  # findings が無いので、絞り込みの対象の表は無い
+        self.assertNotIn("lock ファイルの注意", self.render("github.com/example/web-app"))  # notices の無い古い結果
+        index = htmlreport.render_index({"r": entry}, LATEST, {"r": "r"}, n_new=0, n_hidden=0, hide=set(), made_at=self.made_at)
+        self.assertIn(">注意</button></th>", index)
+        self.assertIn('<td class="num">2</td></tr>', index)
+
     def test_private_is_marked(self):
         page = self.render("github.com/example/private-app")
         self.assertIn("社外に出さないでください", page)

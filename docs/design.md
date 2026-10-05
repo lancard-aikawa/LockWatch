@@ -10,7 +10,7 @@
 あわせて、脆弱性の無いものも含めた**全依存の台帳**（どのリポジトリが何のどの版を使っているか）を残す。
 「この版が侵害された」という知らせが出た日に、照合し直さずに手元で引くため（§3.4）。
 
-脆弱性を探す部分は自作しない。osv-scanner（2.6.0、winget で版固定）に任せ、LockWatch はその周りだけを作る:
+脆弱性を探す部分は自作しない（lock ファイルの健全性の注意 §3.5 だけが例外）。osv-scanner（2.6.0、winget で版固定）に任せ、LockWatch はその周りだけを作る:
 対象の受け取り、osv-scanner の呼び分け、結果の畳み方、キャッシュ、前回との差分。
 
 ## 2. 役割の分け方
@@ -189,6 +189,40 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 - 非公開のリポジトリの依存の一覧を含む。データフォルダの外に出さない（`latest.json` と同じ）
 - 引くのは `lockwatch packages`（§7）
 
+### 3.5 注意（lock ファイルの健全性、`notices`）
+
+脆弱性の照合とは別に、lock ファイルそのものを読んで分かることを、リポジトリごとの `notices` に入れる。
+**ここだけは osv-scanner に任せず自前で読む**（§1 の「自作しない」の例外。osv-scanner は見ないため）。通信はしない。
+
+```json
+"notices": [
+  {"lockfile": "requirements.txt", "kind": "unpinned", "package": "urllib3", "version": "", "detail": ">=1.24.1"},
+  {"lockfile": "package-lock.json", "kind": "not-registry", "package": "left-pad", "version": "1.3.0", "detail": "git+ssh://git@github.com/x/left-pad.git#abc"},
+  {"lockfile": "uv.lock", "kind": "recent", "package": "requests", "version": "2.33.0", "detail": "2026-10-03T08:00:00Z"}
+]
+```
+
+| `kind` | 対象 | 意味 | `detail` |
+|---|---|---|---|
+| `unpinned` | `requirements*.txt` | 版を `==` で 1 つに固定していない | 書かれている指定（無ければ空） |
+| `not-registry` | `requirements*.txt`・`package-lock.json`・`npm-shrinkwrap.json`・`uv.lock` | レジストリ以外（URL・git など）から取る | 取得元（URL の中の利用者名とパスワードは除く） |
+| `no-integrity` | `package-lock.json`・`npm-shrinkwrap.json` | レジストリから取るのに、ハッシュ（`integrity`）が無い | 空。まとめたときは件数（下） |
+| `recent` | `uv.lock` | 公開から 7 日たっていない版（`hygiene.RECENT_DAYS`） | 公開の時刻（その版のファイルの `upload-time` の一番古いもの） |
+
+- `unpinned` が要る理由: osv-scanner は、固定していない行を黙って不正確に扱う（2026-10-05 確認）。
+  `urllib3>=1.24.1`・`django~=2.2.0` は書かれた下限の版（1.24.1・2.2.0）として照合し、実際に入る版より古い版の脆弱性を出す。
+  `jinja2`（指定なし）・`flask==1.*` は版が空になり、**照合されずに 0 件になる**。URL・git の行は対象から外される
+- `not-registry` の「レジストリ」: npm は `https://registry.npmjs.org/` と `https://registry.yarnpkg.com/`。`uv.lock` は `source` が `git` か `url` のもの。
+  手元のフォルダ（`file:`、`link`、`-e ./x`、editable・virtual）は自分のコードなので入れない。社内のレジストリは今は `not-registry` になる（設定で足せるようにするかは §10）
+- `no-integrity` が 1 つの lock ファイルで 20 件（`hygiene.NO_INTEGRITY_MAX`）を超えたら、そのファイルで 1 件にまとめる（`package` は空、`detail` に件数）。
+  ハッシュを書かない古い形式（npm 4 までの shrinkwrap など）で、パッケージごとに並べても意味が無いため（2026-10-05、手元の 1 ファイルから 577 件出た）
+- `recent` は、手元の cooldown（uv の `exclude-newer`）が効いている PC で作った lock ファイルでは出ない。別の PC や他の人が作った lock ファイルの見張り
+- 読めるものだけ読む: `pnpm-lock.yaml`・`yarn.lock` は見ない（標準ライブラリに YAML の読み手が無い）。壊れていて読めないファイルは飛ばす（照合の側で osv-scanner が失敗する）
+- 入れるのは `status` が `ok` のリポジトリだけ（ほかは空）。**キャッシュには入れず、照合のたびに読み直す**（`recent` は日がたつと消えるため。読むだけなので速い）
+- `new` には入れない（前回との差分は脆弱性だけ）。`--hide` も効かない
+- 並びは lock ファイル・`kind`・名前・版の順
+- 0.2.0 までの `latest.json` には無い。無ければ空として扱う
+
 ## 4. private は外に送らない
 
 **`visibility` が `public` のリポジトリだけを、オンライン（api.osv.dev）で照合する。**
@@ -279,7 +313,7 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 - `report`:
   - `--hide` に書けるのは `critical` `high` `medium` `low` `unknown` と `unmaintained` `unsound` `notice`（書き間違いで何も消えないのを防ぐため、これ以外は引数の誤り）。
     消した件数は表示の最後に出す（消したことを忘れない）
-  - 表は、リポジトリごとに 1 行（状態・件数）と、その下に重い順の findings。`--new` は `new` の一覧だけ
+  - 表は、リポジトリごとに 1 行（状態・件数）と、その下に重い順の findings、続けて注意（§3.5）。`--new` は `new` の一覧だけ
   - `--json` は `latest.json` と同じ形で、`--hide` を当てた後のもの。`--new` と一緒なら `new` の配列だけ
   - `--id` はそのリポジトリだけにする（`new` もそのリポジトリの分だけ）。`latest.json` に無ければ終了コード 2
   - `latest.json` がまだ無ければ、その旨を出して終了コード 2
@@ -296,7 +330,7 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 - 終了コード: 0 = 終わった（脆弱性の有無は問わない）、1 = 想定外の失敗（LockWatch の誤り。`--log` なら例外の内容を書く）、2 = 引数の誤り、3 = 実行中、4 = osv-scanner が無い・失敗した
   （1 回でも失敗したら 4。結果はそれでも書き、失敗したリポジトリは `error` にする。フォルダが無いだけの `error` は 0）
 - 定期実行はタスクスケジューラで 1 日 1 回（`scripts/register-task.ps1`。SessionVault と同じ作り）
-  - `<home>\pythonw.exe scripts\lockwatch-launch.py --log scan` を、既定で毎日 9:00 に（`<home>\pythonw.exe` は `scripts\find-pythonw.ps1` が探す Python 3.10 以上の本体の `pythonw.exe`。順に `.venv\pyvenv.cfg` の `home`、`uv python find`、`py`、PATH の `python`。venv の中のものは `sys.base_prefix` の本体に置き換える。`.venv` が無くても動く。
+  - `<home>\pythonw.exe scripts\lockwatch-launch.py --log scan` を、既定で毎日 9:00 に（`<home>\pythonw.exe` は `scripts\find-pythonw.ps1` が探す Python 3.11 以上の本体の `pythonw.exe`。順に `.venv\pyvenv.cfg` の `home`、`uv python find`、`py`、PATH の `python`。venv の中のものは `sys.base_prefix` の本体に置き換える。`.venv` が無くても動く。
     uv 0.11 の `.venv\Scripts\pythonw.exe` はコンソール用で黒い窓が開くため、使わない。`lockwatch-launch.py` が `src` を読み込み先に足す）。止まっていて逃した回は、次に起動したときに動かす
   - 窓を出さない（`pythonw`、osv-scanner は `CREATE_NO_WINDOW`）。優先度は 7（通常より低い。子の osv-scanner も引き継ぐ）
   - ログオンしているときだけ動かす（パスワードを預けない）。ネットにつながっていないときは動かさない（公開のものの照合が失敗するため）
@@ -330,8 +364,9 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
   3. 要約: 深刻度ごとの件数、直る版があるものの件数、前回から新しく出たものの件数
   4. findings の表（重い順）: 深刻度・点数・パッケージ・版・直る版・ID（osv.dev へのリンク）と別名・要約・知らせの種類・lock ファイル・新規の印。
      悪意あるコード（`malicious`）には印を付け、1 件でもあれば要約の最初に件数を書く
-  5. 調べた lock ファイルの一覧
-  6. `no-lockfile` / `error` のときは、その状態と理由だけ
+  5. 注意（§3.5）の表: 種類・パッケージ・版・詳細・lock ファイル。1 件も無ければ出さない。一覧（`index.html`）には件数の列を出す
+  6. 調べた lock ファイルの一覧
+  7. `no-lockfile` / `error` のときは、その状態と理由だけ
 - 説明文（`details`）は載せない（`latest.json` に無い、§3.3）。詳しくは ID のリンク先で見る
 - 印刷（ブラウザの「PDF に保存」）でそのまま渡せる形にする（深刻度の色を印刷でも残す、表の行を途中で切らない）
 
@@ -370,6 +405,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 | 状態 | `status` の内容。ボタン: 全体を照合（`scan`）・DB を取り直す（`db-update`）・定期実行を登録 / 解除（`scripts/register-task.ps1`）・前回のログを開く（`last-run.log`）。動かした仕事の出力を下に出す |
 | 結果 | `latest.json` の一覧（リポジトリ・パッケージ・版・深刻度・ID・直る版・知らせの種類・lock ファイル）。重い順。悪意あるコード（`malicious`）は知らせの列に「悪意あるコード」と出す。「隠す」（深刻度・知らせの種類）、「新しく出たものだけ」、文字で絞り込み。行をダブルクリックすると `https://osv.dev/vulnerability/<id>` を開く |
 | 台帳 | 全依存の台帳（`packages.json`、§3.4）を引く。名前と版を入れると、使っているところを「パッケージ・版・生態系・リポジトリ・lock ファイル」で出す。名前は大文字小文字を区別しない部分一致（`*` `?` を書いたときは、`lockwatch packages` と同じく全体の一致）。版は文字どおりの一致。名前も版も空なら何も出さない（全件は多すぎる）。出すのは先頭 2,000 行までで、件数は全部を数える。照合はしない |
+| 注意 | `latest.json` の注意（§3.5）の一覧（リポジトリ・種類・パッケージ・版・詳細・lock ファイル）。種類ごとに「隠す」、文字で絞り込み |
 | 設定 | §8 の項目を編集して保存する。値は `config set` と同じ規則で検査し、誤りがあれば保存しない。`online_public` には、切ると何も外に送らないことを書き添える。保存は `config.save`（一時ファイルから入れ替え） |
 
 - 画面を開いているあいだに定期実行が結果を書いても、自動では読み直さない（「読み直す」ボタン）
@@ -382,6 +418,8 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 - 所属する組織のリポジトリを対象に入れるか（入れても private なのでオフライン）
 - 新しく出たものの知らせ方（RepoTether の表示だけか、Windows の通知も出すか）
 - Gogs で木の一覧を再帰的に取れるか（RepoTether 側の話）
+- 注意（§3.5）: 社内の npm レジストリを「レジストリ」に足す設定、`recent` の日数の設定、新しく出た注意を `new` のように知らせるか、
+  `pnpm-lock.yaml`・`yarn.lock` を読むか。RepoTether は `notices` をまだ表示しない
 - **保留（2026-10-03）**: Flutter の Android 側（Gradle の依存）を照合するか。osv-scanner は `gradle.lockfile`（Maven）を読めて、検出も確かめた。
   ただし Flutter の雛形は依存を固定しないので、各プロジェクトで `gradle.lockfile` を作って git に入れるか、LockWatch が Gradle を動かして作る必要がある
   （1 つ 1〜4 分、オフラインでは作れず Google・Maven Central への通信が要る）。今の手元のプロジェクトでは見つかるものが無く、効果が限られるので見送った。

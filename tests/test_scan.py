@@ -538,6 +538,28 @@ class ScanTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("台帳にありません", err)
 
+    # ---- lock ファイルの健全性の注意（design.md §3.5）
+
+    def test_notices_are_written_and_reported(self):
+        self.mkrepo("unk", {"sub/requirements-dev.txt": "urllib3>=1.24.1\nrequests==2.19.0\n"})
+        code, out, _ = self.run_cli("scan")
+        self.assertEqual(code, 0)
+        r = self.latest()["repos"]
+        want = [{"lockfile": "sub/requirements-dev.txt", "kind": "unpinned", "package": "urllib3", "version": "", "detail": ">=1.24.1"}]
+        self.assertEqual(r["unk"]["notices"], want)
+        self.assertEqual((r["pub"]["notices"], r["empty"]["notices"], r["gone"]["notices"]), ([], [], []))
+        self.assertRegex(out, r"(?m)^ok +offline unk  1 件（critical 1）、注意 1 件$")
+        code, out, _ = self.run_cli("report")
+        self.assertIn("  注意     urllib3  版を固定していません（>=1.24.1）。照合は不正確か、行われていません  （sub/requirements-dev.txt）", out)
+        self.assertEqual(self.latest()["new"], [])  # 注意は new に入れない
+        # キャッシュから返したときも、注意は読み直して入れる
+        n = len(self.fake.scans())
+        self.run_cli("scan")
+        self.assertEqual(len(self.fake.scans()), n)
+        self.assertEqual(self.latest()["repos"]["unk"]["notices"], want)
+        code, out, _ = self.run_cli("scan", "--repo", str(self.repos / "unk"))
+        self.assertIn("  注意     urllib3  ", out)
+
     # ---- db-update（design.md §5.3）
 
     def test_db_update_scans_only_offline_with_download(self):
