@@ -167,6 +167,14 @@ def _print_new(new: list[dict]) -> None:
         print(f"  {n['severity']:<8} {n['repo']}  {n['package']}  {n['id']}{note}")
 
 
+def _print_new_notices(new: list[dict], list_them: bool = True) -> None:
+    """前回から新しく出た注意（design.md §3.5 の new_notices）"""
+    print(f"新しく出た注意: {len(new)} 件")
+    for n in new if list_them else []:
+        name = " ".join(x for x in (n.get("package"), n.get("version")) if x) or "-"
+        print(f"  注意     {n.get('repo')}  {name}  {hygiene.KIND_LABEL.get(n.get('kind'), n.get('kind'))}  （{n.get('lockfile')}）")
+
+
 def _scanner(cfg: dict) -> tuple[str, str] | None:
     """(osv-scanner の場所, 版)。無ければ理由を出して None"""
     try:
@@ -245,6 +253,7 @@ def _cmd_scan(args, cfg: dict) -> int:
         new = [n for n in latest.get("new", []) if not args.id or n.get("repo") == args.id]
         print(f"新しく出たもの: {len(new)} 件（{store.results_dir(data) / 'latest.json'}）")
         _print_new(new)
+        _print_new_notices([n for n in latest.get("new_notices") or [] if not args.id or n.get("repo") == args.id])
     return EXIT_SCANNER if out.scanner_failed else EXIT_OK
 
 
@@ -279,8 +288,9 @@ def _cmd_report(args, cfg: dict) -> int:
 
     if args.html:
         return _write_html(args, cfg, data, latest, repos, new, n_hidden, hide)
+    new_notices = [n for n in latest.get("new_notices") or [] if not args.id or n.get("repo") == args.id]
     if args.json:
-        obj = new if args.new else {**latest, "repos": repos, "new": new}
+        obj = new if args.new else {**latest, "repos": repos, "new": new, "new_notices": new_notices}
         print(json.dumps(obj, ensure_ascii=False, indent=2))
         return EXIT_OK
 
@@ -294,6 +304,7 @@ def _cmd_report(args, cfg: dict) -> int:
             _print_findings(e["findings"])
             _print_notices(e.get("notices") or [])
         print(f"新しく出たもの: {len(new)} 件")
+    _print_new_notices(new_notices, list_them=args.new)
     if hide:
         print(f"（--hide {' '.join(sorted(hide))} で {n_hidden} 件を消しています）")
     return EXIT_OK
@@ -409,6 +420,8 @@ def _write_scan_results(data: Path, cfg: dict, out, ver: str, at, only_id: str |
         doc = dict(prev)
         doc["repos"] = {**prev["repos"], **out.repos}
         doc["new"] = [n for n in prev.get("new") or [] if n.get("repo") != only_id] + store.new_findings(prev, out.repos)
+        doc["new_notices"] = ([n for n in prev.get("new_notices") or [] if n.get("repo") != only_id]
+                              + store.new_notices(prev, out.repos))
         doc["osv_scanner"] = ver
         if out.db_downloaded_at:
             doc["db_downloaded_at"] = out.db_downloaded_at
@@ -421,6 +434,7 @@ def _write_scan_results(data: Path, cfg: dict, out, ver: str, at, only_id: str |
         "db_downloaded_at": out.db_downloaded_at,
         "repos": out.repos,
         "new": store.new_findings(prev, out.repos),
+        "new_notices": store.new_notices(prev, out.repos),
     }
     store.write_results(data, doc, at, history=not only_id, keep=cfg["keep_results"])
 

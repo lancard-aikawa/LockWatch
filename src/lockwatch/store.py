@@ -167,6 +167,29 @@ def new_findings(prev: dict | None, repos: dict[str, dict]) -> list[dict]:
     return out
 
 
+def notice_key(n: dict) -> tuple:
+    return (n.get("lockfile"), n.get("kind"), n.get("package"), n.get("version"))
+
+
+def new_notices(prev: dict | None, repos: dict[str, dict]) -> list[dict]:
+    """前回の latest.json に無かった注意（design.md §3.5）。前回が無い・前回 ok でなかった・
+    前回の結果に notices が無い（注意を入れる前の版で書いた）リポジトリは比べない"""
+    if prev is None:
+        return []
+    out = []
+    for rid, cur in repos.items():
+        old = prev["repos"].get(rid)
+        if not isinstance(old, dict) or old.get("status") != "ok" or cur.get("status") != "ok":
+            continue
+        if not isinstance(old.get("notices"), list):
+            continue
+        known = {notice_key(n) for n in old["notices"]}
+        for n in cur.get("notices") or []:
+            if notice_key(n) not in known:
+                out.append({"repo": rid, "lockfile": n["lockfile"], "kind": n["kind"], "package": n["package"], "version": n["version"]})
+    return out
+
+
 # ---- 全依存の台帳（§3.4）
 
 def packages_path(data: Path) -> Path:

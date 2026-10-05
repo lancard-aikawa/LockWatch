@@ -67,6 +67,9 @@ class RowsTest(unittest.TestCase):
         self.assertIn("照合されていません", rows[0][4])
         self.assertEqual([r[2] for r in gui.notice_rows(latest, {"unpinned"}, "")], ["fresh"])
         self.assertEqual([r[2] for r in gui.notice_rows(latest, set(), "UV.LOCK")], ["fresh"])
+        fresh = {**latest, "new_notices": [{"repo": "r", "lockfile": "uv.lock", "kind": "recent", "package": "fresh", "version": "2.0.0"}]}
+        self.assertEqual([r[2] for r in gui.notice_rows(fresh, set(), "", new_only=True)], ["fresh"])
+        self.assertEqual(gui.notice_rows(latest, set(), "", new_only=True), [])
         self.assertEqual(gui.notice_rows(LATEST, set(), ""), [])  # notices の無い古い結果
         self.assertEqual(gui.notice_rows(None, set(), ""), [])
 

@@ -560,6 +560,48 @@ class ScanTest(unittest.TestCase):
         code, out, _ = self.run_cli("scan", "--repo", str(self.repos / "unk"))
         self.assertIn("  注意     urllib3  ", out)
 
+    def test_new_notices_lists_only_what_was_not_there_before(self):
+        self.mkrepo("unk", {"sub/requirements-dev.txt": "urllib3>=1.24.1\n"})
+        code, out, _ = self.run_cli("scan")
+        self.assertEqual(self.latest()["new_notices"], [])  # 初回は空
+        self.assertIn("新しく出た注意: 0 件", out)
+        self.mkrepo("unk", {"sub/requirements-dev.txt": "urllib3>=1.24.1\njinja2\n"})
+        self.mkrepo("priv", {"requirements.txt": "six @ https://user:pw@example.invalid/six.tar.gz\n"})
+        code, out, _ = self.run_cli("scan")
+        want = [{"repo": "priv", "lockfile": "requirements.txt", "kind": "not-registry", "package": "six", "version": ""},
+                {"repo": "unk", "lockfile": "sub/requirements-dev.txt", "kind": "unpinned", "package": "jinja2", "version": ""}]
+        self.assertEqual(self.latest()["new_notices"], want)
+        self.assertIn("新しく出た注意: 2 件", out)
+        self.assertIn("  注意     priv  six  レジストリ以外から取得  （requirements.txt）", out)
+        self.assertNotIn("user:pw", json.dumps(self.latest()))  # URL の中の利用者名とパスワードは残さない
+        code, out, _ = self.run_cli("report", "--new")
+        self.assertIn("  注意     unk  jinja2  版を固定していない  （sub/requirements-dev.txt）", out)
+        code, out, _ = self.run_cli("report")
+        self.assertIn("新しく出た注意: 2 件", out)
+        self.assertNotIn("  注意     unk  jinja2", out)  # 一覧は --new のときだけ
+        self.assertEqual(json.loads(self.run_cli("report", "--json", "--id", "unk")[1])["new_notices"], want[1:])
+        self.assertIsInstance(json.loads(self.run_cli("report", "--json", "--new")[1]), list)  # new の配列の形は変えない
+        # --id はそのリポジトリの分だけ入れ替える
+        self.mkrepo("unk", {"sub/requirements-dev.txt": "urllib3>=1.24.1\njinja2\nflask\n"})
+        self.run_cli("scan", "--id", "unk")
+        self.assertEqual([(n["repo"], n["package"]) for n in self.latest()["new_notices"]], [("priv", "six"), ("unk", "flask")])
+        # 変わらなければ、次の照合で空に戻る
+        self.run_cli("scan")
+        self.assertEqual(self.latest()["new_notices"], [])
+
+    def test_results_written_before_notices_existed_do_not_make_everything_new(self):
+        self.mkrepo("unk", {"sub/requirements-dev.txt": "urllib3>=1.24.1\n"})
+        self.run_cli("scan")
+        path = self.data / "results" / "latest.json"
+        doc = self.latest()
+        for e in doc["repos"].values():
+            e.pop("notices", None)   # 注意を入れる前の版が書いた結果
+        doc.pop("new_notices", None)
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        self.run_cli("scan")
+        self.assertEqual(len(self.latest()["repos"]["unk"]["notices"]), 1)
+        self.assertEqual(self.latest()["new_notices"], [])
+
     # ---- db-update（design.md §5.3）
 
     def test_db_update_scans_only_offline_with_download(self):

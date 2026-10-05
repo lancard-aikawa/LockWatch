@@ -297,7 +297,8 @@ def render_repo(rid: str, entry: dict, latest: dict, *, new_ids: set[tuple[str, 
     notices = entry.get("notices") or []
     if status == "ok" and notices:
         out.append(f"<h2>lock ファイルの注意</h2>\n<p>脆弱性の照合とは別に、lock ファイルを読んで分かった {len(notices)} 件です。</p>")
-        out.append(_notices_table(notices))
+        fresh = {store.notice_key(n) for n in latest.get("new_notices") or [] if n.get("repo") == rid}
+        out.append(_notices_table(notices, fresh))
 
     lockfiles = entry.get("lockfiles") or []
     if lockfiles:
@@ -342,10 +343,12 @@ def _findings_table(findings: list[dict], new_ids: set[tuple[str, str]]) -> str:
     return _table(head, rows)
 
 
-def _notices_table(notices: list[dict]) -> str:
-    """lock ファイルの健全性の注意（design.md §3.5）。絞り込みと並べ替えの対象にはしない（data-lw を付けない）"""
+def _notices_table(notices: list[dict], fresh: set[tuple] = frozenset()) -> str:
+    """lock ファイルの健全性の注意（design.md §3.5）。絞り込みと並べ替えの対象にはしない（data-lw を付けない）。
+    fresh は前回から新しく出たもの（store.notice_key）"""
+    new_tag = '<span class="tag new">新規</span> '
     rows = [
-        f'<tr><td class="nowrap">{_e(hygiene.KIND_LABEL.get(n.get("kind"), n.get("kind")))}</td>'
+        f'<tr><td class="nowrap">{new_tag if store.notice_key(n) in fresh else ""}{_e(hygiene.KIND_LABEL.get(n.get("kind"), n.get("kind")))}</td>'
         f'<td class="nowrap"><span class="mono">{_e(n.get("package") or "-")}</span>'
         + (f'<br><span class="muted mono">{_e(n.get("version"))}</span>' if n.get("version") else "") + "</td>"
         f'<td>{_e(hygiene.describe(n))}</td><td class="mono path">{_e(n.get("lockfile"))}</td></tr>'

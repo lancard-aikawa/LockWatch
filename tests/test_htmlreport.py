@@ -114,6 +114,11 @@ class RenderTest(unittest.TestCase):
         self.assertIn("&lt;b&gt;jinja2&lt;/b&gt;", page)
         self.assertNotIn("<b>jinja2</b>", page)
         self.assertEqual(page.count("<table data-lw>"), 0)  # findings が無いので、絞り込みの対象の表は無い
+        self.assertNotIn('<span class="tag new">新規</span>', page)
+        fresh = {**LATEST, "new_notices": [{"repo": "r", "lockfile": "package-lock.json", "kind": "not-registry", "package": "forked", "version": "1.3.0"},
+                                           {"repo": "other", "lockfile": "requirements.txt", "kind": "unpinned", "package": "<b>jinja2</b>", "version": ""}]}
+        page = htmlreport.render_repo("r", entry, fresh, new_ids=set(), n_hidden=0, hide=set(), made_at=self.made_at)
+        self.assertEqual(page.count('<span class="tag new">新規</span>'), 1)  # ほかのリポジトリの分は付けない
         self.assertNotIn("lock ファイルの注意", self.render("github.com/example/web-app"))  # notices の無い古い結果
         index = htmlreport.render_index({"r": entry}, LATEST, {"r": "r"}, n_new=0, n_hidden=0, hide=set(), made_at=self.made_at)
         self.assertIn(">注意</button></th>", index)

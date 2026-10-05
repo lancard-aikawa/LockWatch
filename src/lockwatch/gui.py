@@ -87,14 +87,18 @@ def result_rows(latest: dict | None, hide: set[str], new_only: bool, text: str) 
     return rows
 
 
-def notice_rows(latest: dict | None, hide: set[str], text: str) -> list[tuple]:
+def notice_rows(latest: dict | None, hide: set[str], text: str, new_only: bool = False) -> list[tuple]:
     """注意のタブの行: (repo, kind, package, version, 詳細の文, lockfile)。latest.json の並びのまま。
-    hide は種類（design.md §3.5 の kind）。text はどの列でも部分一致（大文字小文字を区別しない）"""
+    hide は種類（design.md §3.5 の kind）。text はどの列でも部分一致（大文字小文字を区別しない）。
+    new_only なら、前回から新しく出たもの（new_notices）だけ"""
     needle = text.strip().lower()
+    new = {(n.get("repo"), *store.notice_key(n)) for n in (latest or {}).get("new_notices") or []}
     rows = []
     for rid, entry in ((latest or {}).get("repos") or {}).items():
         for n in (entry or {}).get("notices") or []:
             if n.get("kind") in hide:
+                continue
+            if new_only and (rid, *store.notice_key(n)) not in new:
                 continue
             row = (rid, n.get("kind", ""), n.get("package", ""), n.get("version", ""), hygiene.describe(n), n.get("lockfile", ""))
             if needle and not any(needle in str(x).lower() for x in row):
@@ -468,6 +472,9 @@ class App:
             v = tk.BooleanVar(value=False)
             self.notice_hide_vars[key] = v
             ttk.Checkbutton(filters, text=label, variable=v, command=self.show_notices).pack(side=tk.LEFT, padx=(4, 0))
+        self.notice_new_only = tk.BooleanVar(value=False)
+        ttk.Checkbutton(filters, text="新しく出たものだけ", variable=self.notice_new_only,
+                        command=self.show_notices).pack(side=tk.LEFT, padx=(16, 0))
         self.notice_search = tk.StringVar()
         self.notice_search.trace_add("write", lambda *_: self.show_notices())
         ttk.Entry(filters, textvariable=self.notice_search, width=24).pack(side=tk.RIGHT)
@@ -492,7 +499,7 @@ class App:
 
     def show_notices(self) -> None:
         hide = {k for k, v in self.notice_hide_vars.items() if v.get()}
-        rows = notice_rows(self.latest, hide, self.notice_search.get())
+        rows = notice_rows(self.latest, hide, self.notice_search.get(), self.notice_new_only.get())
         self.notice_tree.delete(*self.notice_tree.get_children())
         for r in rows:
             self.notice_tree.insert("", tk.END, values=(r[0], hygiene.KIND_LABEL.get(r[1], r[1]), *r[2:]))
