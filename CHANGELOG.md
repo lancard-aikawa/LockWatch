@@ -2,7 +2,17 @@
 
 <!-- 見出しは `## <版番号>` の形にする。まだ出していない変更は「## 未公開」に書き、リリースのときに版番号へ書き換える -->
 
-## 未公開
+## 0.3.0
+
+上げるときに気を付けること:
+
+- **Python 3.11 以上が要る**（これまでは 3.10 以上）
+- **定期実行を `scripts\register-task.ps1` で登録し直す**（黒い窓が開かないようにするため）
+- 上げたあとの最初の照合は、キャッシュを使わずに全部を照合し直す。全依存の台帳と注意は、そこで初めて作られる
+- **該当するリポジトリは件数が減る**（`vendor` などのフォルダの中の lock ファイルを、既定で調べなくなるため。下の `exclude_dirs`）
+- 悪意あるコードとして報告されたパッケージの深刻度が、`unknown` から `critical` に変わる
+
+変更:
 
 - ほかの人のコードを取り込んだフォルダの中の lock ファイルを、対象から外す（設定 `exclude_dirs`。既定は `vendor` `vendors` `third_party` `third-party`
   `bower_components` `node_modules`）。そこにある lock ファイルは取り込んだパッケージ自身の開発用で、自分では直せない。
@@ -41,7 +51,7 @@
 - `run-lockwatch.bat`: リポジトリの直下に置いた、画面を開くための入口（ダブルクリックで開く。`scripts\lockwatch-gui.cmd` を呼ぶだけ）
 - 定期実行で黒い窓が開いていたのを直す。uv 0.11 の `.venv\Scripts\pythonw.exe` はコンソール用だったため、
   本体の Python の `pythonw.exe` で `scripts\lockwatch-launch.py` を動かすようにした。**`scripts\register-task.ps1` で登録し直す**
-- `scripts\register-task.ps1` と `scripts\lockwatch-gui.cmd` が `.venv` の無い環境で止まっていたのを直す。`scripts\find-pythonw.ps1` が Python 3.10 以上を探す（`.venv`、`uv python find`、`py`、PATH の `python` の順）
+- `scripts\register-task.ps1` と `scripts\lockwatch-gui.cmd` が `.venv` の無い環境で止まっていたのを直す。`scripts\find-pythonw.ps1` が Python 3.11 以上を探す（`.venv`、`uv python find`、`py`、PATH の `python` の順）
 - `scripts\register-task.ps1` が Windows PowerShell 5.1（`powershell`）で構文エラーになっていたのを直す（日本語を含む BOM の無い UTF-8 を cp932 として読まれていた）。
   スクリプトは英語だけにした（表示も英語になる）。使い方の例を `pwsh` から `powershell -NoProfile -ExecutionPolicy Bypass -File` に変えた（`pwsh` は入っていない環境がある）
 - `lockwatch report --id <id>`: そのリポジトリだけを表示する
