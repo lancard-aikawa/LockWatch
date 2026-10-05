@@ -124,6 +124,48 @@ class RenderTest(unittest.TestCase):
         self.assertIn(">注意</button></th>", index)
         self.assertIn('<td class="num">2</td></tr>', index)
 
+    def test_actions_section_and_data_block(self):
+        entry = {"status": "ok", "visibility": "private", "mode": "offline", "scanned_at": "2026-10-05T12:00:00+09:00",
+                 "lockfiles": ["requirements.txt"],
+                 "findings": [finding("pillow", "PYSEC-1", "high", fixed=("12.3.0",)),
+                              {**finding("evil", "MAL-2026-1", "critical", fixed=()), "malicious": True},
+                              finding("odd", "PYSEC-3", "low", fixed=(), summary="</script><script>alert(1)</script>")],
+                 "notices": [{"lockfile": "uv.lock", "kind": "unpinned", "package": "Pillow", "version": "", "detail": ">=12.2.0"},
+                             {"lockfile": "uv.lock", "kind": "recent", "package": "fresh", "version": "2.0.0", "detail": "2026-10-03T08:00:00Z"}]}
+        page = htmlreport.render_repo("r", entry, LATEST, new_ids=set(), n_hidden=0, hide=set(), made_at=self.made_at)
+        self.assertIn('<h2 id="actions">対応</h2>', page)
+        self.assertLess(page.index('id="actions"'), page.index("<h2>見つかったもの</h2>"))  # 要約の次
+        order = [page.index(x) for x in ('class="tag mal">取り除く', 'class="tag">版を固定する', 'class="tag">版を上げる', 'class="tag">確かめる')]
+        self.assertEqual(order, sorted(order))
+        # 版を固定していない行のパッケージは、書かれた版を「今の版」として扱わない
+        self.assertIn('（書かれた下限は <span class="mono">1.0</span>）は、実際の版が <strong class="mono">12.3.0</strong> より古ければ', page)
+        self.assertIn("先に上の「版を固定する」を行い", page)
+        self.assertEqual(page.count("「版を固定する」について:"), 1)  # 説明は 1 回だけ
+        pinned = {**entry, "notices": []}
+        page2 = htmlreport.render_repo("r", pinned, LATEST, new_ids=set(), n_hidden=0, hide=set(), made_at=self.made_at)
+        self.assertIn('<span class="mono">pillow 1.0</span> を <strong class="mono">12.3.0</strong> 以上に上げる', page2)
+        self.assertNotIn("「版を固定する」について:", page2)
+        self.assertIn("直る版がまだ無いもの: PYSEC-3", page)
+        self.assertIn("実際に入っている版のものではありません", page)
+        self.assertIn('<span class="mono">Pillow&gt;=12.2.0</span>', page)
+        # 機械で読むためのデータ。HTML を壊す文字は入れない
+        m = re.search(r'<script type="application/json" id="lockwatch-report">\n(.*?)\n</script>', page, re.S)
+        self.assertNotIn("<", m.group(1))
+        data = json.loads(m.group(1))
+        self.assertEqual((data["repo"], data["visibility"], data["mode"], data["scanned_at"]), ("r", "private", "offline", "2026-10-05T12:00:00+09:00"))
+        self.assertEqual([a["action"] for a in data["actions"]], ["remove", "pin", "upgrade", "upgrade", "review"])
+        self.assertEqual(data["actions"][2]["target"], "12.3.0")
+        self.assertEqual(data["findings"][2]["summary"], "</script><script>alert(1)</script>")  # 読み戻せば元の文字
+        self.assertEqual(len(data["notices"]), 2)
+        self.assertEqual(page.count("<script>"), 1)  # 実行されるのは埋め込みの 1 つだけ
+
+    def test_no_actions_section_when_there_is_nothing_to_do(self):
+        entry = {"status": "ok", "visibility": "public", "mode": "online", "lockfiles": ["uv.lock"], "findings": [], "notices": []}
+        page = htmlreport.render_repo("r", entry, LATEST, new_ids=set(), n_hidden=0, hide=set(), made_at=self.made_at)
+        self.assertNotIn('id="actions"', page)
+        self.assertIn('"actions": []', page)
+        self.assertNotIn("lockwatch-report", self.render("local:C:/Repos/broken"))  # 照合できなかったものには入れない
+
     def test_private_is_marked(self):
         page = self.render("github.com/example/private-app")
         self.assertIn("社外に出さないでください", page)

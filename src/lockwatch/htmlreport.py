@@ -5,13 +5,14 @@ latest.json から、リポジトリごとの診断書と一覧（index.html）�
 """
 import hashlib
 import html
+import json
 import os
 import re
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from . import __version__, fold, hygiene, store
+from . import __version__, advice, fold, hygiene, store
 
 GENERATOR = f"LockWatch {__version__}"
 _GENERATOR_MARK = '<meta name="generator" content="LockWatch'
@@ -100,6 +101,8 @@ td.num { text-align: right; white-space: nowrap; }
 .tag.new { border-color: var(--high); color: var(--high); font-weight: bold; }
 .tag.mal { border-color: var(--critical); background: var(--critical); color: #fff; font-weight: bold; }
 p.mal { color: var(--critical); font-weight: bold; }
+ol.actions { padding-left: 1.6em; }
+ol.actions li { margin: 0 0 8px; break-inside: avoid; }
 .mono { font-family: Consolas, "BIZ UDGothic", monospace; font-size: 12px; }
 .path { word-break: break-all; }
 .nowrap { white-space: nowrap; }
@@ -284,6 +287,9 @@ def render_repo(rid: str, entry: dict, latest: dict, *, new_ids: set[tuple[str, 
         else:
             out.append('<p class="ok">既知の脆弱性は見つかりませんでした。</p>')
         out.append(_tiles(_counts(findings), [("直る版あり", n_fixed), ("前回から新規", n_new)]))
+        acts = advice.actions(findings, entry.get("notices") or [])
+        if acts:
+            out.append(_actions_section(acts))
         if findings:
             out.append("<h2>見つかったもの</h2>")
             present = {f.get("severity") for f in findings}
@@ -304,7 +310,81 @@ def render_repo(rid: str, entry: dict, latest: dict, *, new_ids: set[tuple[str, 
     if lockfiles:
         out.append("<h2>調べた lock ファイル</h2>\n<ul>" + "".join(f'<li class="mono path">{_e(p)}</li>' for p in lockfiles) + "</ul>")
     out.append(_footer(made_at, n_hidden, hide))
+    if status == "ok":
+        out.append(_data_block({
+            "format": store.FORMAT, "generator": GENERATOR, "repo": rid, "visibility": vis, "mode": entry.get("mode"),
+            "scanned_at": entry.get("scanned_at") or latest.get("scanned_at"),
+            "actions": advice.actions(findings, notices), "findings": findings, "notices": notices}))
     return _page(f"脆弱性診断書 {rid}", "\n".join(out))
+
+
+def _data_block(obj: dict) -> str:
+    """機械で読むためのデータ（design.md §7.1）。実行されるスクリプトではない。HTML の中に置くので < は \\u003c にする"""
+    text = json.dumps(obj, ensure_ascii=False, indent=1).replace("<", "\\u003c")
+    return f'<script type="application/json" id="lockwatch-report">\n{text}\n</script>'
+
+
+def _pkg(a: dict) -> str:
+    name = " ".join(x for x in (a.get("package"), a.get("version")) if x) or "（名前なし）"
+    return f'<span class="mono">{_e(name)}</span>'
+
+
+def _action_item(a: dict) -> str:
+    where = f'<span class="muted">（<span class="mono">{_e(a.get("lockfile"))}</span>）</span>'
+    kind = a["action"]
+    if kind == "remove":
+        ids = "、".join(_e(i) for i in a["ids"])
+        return (f'<li><span class="tag mal">取り除く</span> {_pkg(a)} を依存から取り除く {where}。悪意あるコードとして報告されています（{ids}）。'
+                "すでに入れた環境は、侵害されたものとして扱ってください（鍵やトークンの入れ替えを含む）。</li>")
+    if kind == "pin":
+        pkgs = "、".join(f'<span class="mono">{_e(p["package"])}{_e(p["spec"])}</span>' for p in a["packages"])
+        return (f'<li><span class="tag">版を固定する</span> <span class="mono">{_e(a.get("lockfile"))}</span> の次の {len(a["packages"])} 行を、'
+                f'<span class="mono">==</span> で 1 つの版に固定する: {pkgs}。</li>')
+    if kind == "upgrade":
+        counts = "・".join(f"{SEVERITY_LABEL.get(s, s)} {n}" for s, n in a["severities"].items())
+        target = f'<strong class="mono">{_e(a["target"])}</strong>' if a["target"] else ""
+        extra = []
+        if a["unpinned"]:
+            # 版は書かれた下限で、実際に入っている版ではない。「この版から上げる」とは書かない
+            name = f'<span class="mono">{_e(a.get("package"))}</span>（書かれた下限は <span class="mono">{_e(a.get("version"))}</span>）'
+            head = f"{name}は、実際の版が {target} より古ければ {target} 以上に上げる" if target else f"{name}は、上げる先の版を確かめる"
+            extra.append("版が固定されていないので、先に上の「版を固定する」を行い、実際の版を確かめる")
+        elif target:
+            head = f"{_pkg(a)} を {target} 以上に上げる"
+        else:
+            head = f"{_pkg(a)} は、上げる先の版を確かめる"
+        if a["unclear"]:
+            extra.append("直る版を確かめるもの: " + "、".join(_e(i) for i in a["unclear"]))
+        if a["unfixed"]:
+            extra.append("直る版がまだ無いもの: " + "、".join(_e(i) for i in a["unfixed"]))
+        return (f'<li><span class="tag">版を上げる</span> {head} {where}。{a["count"]} 件（{_e(counts)}）'
+                + "".join(f"<br><span class=\"muted\">{x}</span>" for x in extra) + "</li>")
+    label = hygiene.KIND_LABEL.get(a.get("kind"), a.get("kind"))
+    todo = {"not-registry": "取得元が意図したものかを確かめる", "no-integrity": "lock ファイルを作り直してハッシュを入れる",
+            "recent": "公開から日が浅いので、様子を見るか前の版に戻す"}.get(a.get("kind"), "確かめる")
+    return (f'<li><span class="tag">確かめる</span> {_pkg(a) if a.get("package") else ""} {_e(label)}: {_e(hygiene.describe(a))} {where}。'
+            f"{_e(todo)}。</li>")
+
+
+def _actions_section(acts: list[dict]) -> str:
+    """対応の節（design.md §7.1）。指示はすべて見える文字で書く"""
+    return (
+        '<h2 id="actions">対応</h2>\n'
+        "<p>上から順に行ってください。この診断書を、このリポジトリで作業する人や AI（Claude など）に渡せば、ここに書いた内容で直し始められます。"
+        "上げる先の版は目安です（新しい版は古い修正も含む、という前提）。上げたあとは動作を確かめ、照合し直してください。"
+        '同じ内容を、このファイルの中の <span class="mono">&lt;script type="application/json" id="lockwatch-report"&gt;</span> にも入れています。</p>\n'
+        + (PIN_NOTE if any(a["action"] == "pin" for a in acts) else "")
+        + '<ol class="actions">\n' + "\n".join(_action_item(a) for a in acts) + "\n</ol>"
+    )
+
+
+# 「版を固定する」が 1 つでもあるときに、一覧の前に 1 回だけ書く
+PIN_NOTE = (
+    "<p><strong>「版を固定する」について:</strong> 固定する版は、実際に使っている環境で "
+    '<span class="mono">pip freeze</span>（uv なら <span class="mono">uv pip freeze</span>）を実行して確かめてください。'
+    "<strong>固定するまで、その行のパッケージについてのこの診断書の結果は、実際に入っている版のものではありません</strong>"
+    "（書かれた下限の版で照合しているか、照合していません）。固定したあとで照合し直してください。</p>\n"
+)
 
 
 def _findings_table(findings: list[dict], new_ids: set[tuple[str, str]]) -> str:
