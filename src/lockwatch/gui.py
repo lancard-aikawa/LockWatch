@@ -479,12 +479,12 @@ class App:
 
         table = ttk.Frame(tab)
         table.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(8, 0))
-        cols = [("repo", "リポジトリ", 220), ("kind", "種類", 130), ("package", "パッケージ", 140), ("version", "版", 70),
-                ("detail", "詳細", 260), ("lockfile", "lock ファイル", 140)]
+        cols = [("repo", "リポジトリ", 200), ("kind", "種類", 130), ("package", "パッケージ", 120), ("version", "版", 60),
+                ("detail", "詳細", 380), ("lockfile", "lock ファイル", 140)]
         self.notice_tree = ttk.Treeview(table, columns=[c[0] for c in cols], show="headings")
         for key, label, width in cols:
             self.notice_tree.heading(key, text=label)
-            self.notice_tree.column(key, width=width, stretch=key in ("repo", "detail"))
+            self.notice_tree.column(key, width=width, stretch=key == "detail")
         scroll = ttk.Scrollbar(table, orient=tk.VERTICAL, command=self.notice_tree.yview)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.notice_tree.configure(yscrollcommand=scroll.set)
