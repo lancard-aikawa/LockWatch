@@ -81,8 +81,8 @@ uv run lockwatch config show
 - 手元の脆弱性 DB は初回に取る（使う生態系の分だけ。npm だけで約 200 MB）。その後は 7 日ごとに取り直す
 - 脆弱性とは別に、lock ファイルの健全性の「注意」を出す（`lockwatch report`・診断書・画面の「注意」タブ）。とくに、版を `==` で固定していない
   `requirements*.txt` の行は、osv-scanner が書かれた下限の版で照合するか、照合せずに 0 件とするので、その結果は当てにならない。
-  ほかに、レジストリ以外（URL・git）から取るパッケージ、ハッシュの無い `package-lock.json`、公開から 7 日たっていない版（`uv.lock`）。
-  `pnpm-lock.yaml` と `yarn.lock` は見ない（[docs/design.md](docs/design.md) §3.5）
+  ほかに、レジストリ以外（URL・git）から取るパッケージ、ハッシュの無いパッケージ（`package-lock.json`・`npm-shrinkwrap.json`・`pnpm-lock.yaml`・`yarn.lock`）、
+  公開から 7 日たっていない版（`uv.lock`）。`bun.lock` などは見ない（[docs/design.md](docs/design.md) §3.5）
 - ほかの人のコードを取り込んだフォルダ（`vendor`・`third_party`・`bower_components` など）の中の lock ファイルは調べない。
   取り込んだパッケージ自身の開発用のもので、自分では直せないため。外したファイルは結果と診断書に書く。
   フォルダ名は設定 `exclude_dirs` で変えられる（`uv run lockwatch config set exclude_dirs "vendor,examples"`。空にすると何も外さない）

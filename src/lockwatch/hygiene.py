@@ -1,7 +1,8 @@
 """lock ファイルの健全性の注意（docs/design.md §3.5）
 
 脆弱性の照合（osv-scanner）とは別に、lock ファイルそのものを読んで分かることを拾う。通信はしない。
-読めるのは requirements*.txt・package-lock.json・npm-shrinkwrap.json・uv.lock。壊れていて読めないファイルは飛ばす。
+読めるのは requirements*.txt・package-lock.json・npm-shrinkwrap.json・pnpm-lock.yaml・yarn.lock・uv.lock。
+壊れていて読めないファイルは飛ばす。
 """
 import json
 import re
@@ -123,13 +124,153 @@ def package_lock(text: str) -> list[dict]:
                 entries.append((name, e))
     elif isinstance(doc.get("dependencies"), dict):
         entries = list(_npm_v1(doc["dependencies"]))
-    found = [n for n in (_npm_entry(name, e) for name, e in entries) if n is not None]
+    return _collapse([n for n in (_npm_entry(name, e) for name, e in entries) if n is not None])
+
+
+def _collapse(found: list[dict]) -> list[dict]:
+    """ハッシュなしが多すぎるファイルは、1 つずつ並べずに 1 件にまとめる（ハッシュを書かない古い形式。npm 4 までの shrinkwrap など）"""
     bare = [n for n in found if n["kind"] == "no-integrity"]
-    if len(bare) > NO_INTEGRITY_MAX:
-        # ハッシュを書かない古い形式（npm 4 までの shrinkwrap など）。1 つずつ並べず、ファイルごとに 1 件にまとめる
-        count = len({(n["package"], n["version"]) for n in bare})   # 入れ子で同じものが何度も出る
-        found = [n for n in found if n["kind"] != "no-integrity"] + [_notice("no-integrity", "", detail=str(count))]
-    return found
+    if len(bare) <= NO_INTEGRITY_MAX:
+        return found
+    count = len({(n["package"], n["version"]) for n in bare})   # 入れ子で同じものが何度も出る
+    return [n for n in found if n["kind"] != "no-integrity"] + [_notice("no-integrity", "", detail=str(count))]
+
+
+# ---- pnpm-lock.yaml / yarn.lock
+# YAML として全部は解釈しない（標準ライブラリに読み手が無い）。要る項目だけを行ごとに読む。design.md §3.5
+
+def _unquote(s: str) -> str:
+    s = s.strip()
+    return s[1:-1] if len(s) >= 2 and s[0] == s[-1] and s[0] in "'\"" else s
+
+
+def _split_name(spec: str) -> tuple[str, str]:
+    """名前@残り → (名前, 残り)。先頭の @（スコープ）は区切りにしない"""
+    at = spec.find("@", 1)
+    return (spec, "") if at < 0 else (spec[:at], spec[at + 1:])
+
+
+_FLOW_PAIR = re.compile(r"""([\w-]+):\s*('[^']*'|"[^"]*"|[^,}]*)""")
+
+
+def _pnpm_key(key: str) -> tuple[str, str]:
+    """packages の見出し → (名前, 版)。形式 9・6 は 名前@版、形式 5 は /名前/版"""
+    key = _unquote(key).lstrip("/")
+    key = re.sub(r"\(.*$", "", key)          # (react@18.2.0) のような付け足し
+    scope = key[:key.find("/") + 1] if key.startswith("@") and "/" in key else ""
+    rest = key[len(scope):]
+    slash, at = rest.find("/"), rest.find("@")
+    if slash >= 0 and (at < 0 or slash < at):   # 形式 5: 名前の次が /。版の後ろの _peer@1.0.0 は付け足し
+        return scope + rest[:slash], rest[slash + 1:].split("_", 1)[0]
+    return _split_name(key)
+
+
+def _pnpm_entry(key: str, resolution: dict[str, str], version: str) -> dict | None:
+    name, from_key = _pnpm_key(key)
+    version = version or ("" if "/" in from_key or ":" in from_key else from_key)   # 見出しが 名前@URL のことがある
+    if "directory" in resolution:
+        return None  # 手元のフォルダ
+    tarball = resolution.get("tarball", "")
+    if resolution.get("type") == "git" or "repo" in resolution:
+        where = resolution.get("repo", "") + ("#" + resolution["commit"] if resolution.get("commit") else "")
+        return _notice("not-registry", name, version, redact(where))
+    if tarball and not tarball.startswith(NPM_REGISTRIES):
+        return _notice("not-registry", name, version, redact(tarball))
+    if not resolution.get("integrity"):
+        return _notice("no-integrity", name, version)
+    return None
+
+
+def pnpm_lock(text: str) -> list[dict]:
+    out: list[dict] = []
+    key, resolution, version, in_resolution, in_packages = None, {}, "", False, False
+
+    def flush():
+        if key is not None:
+            n = _pnpm_entry(key, resolution, version)
+            if n is not None:
+                out.append(n)
+
+    for raw in text.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        line = raw.strip()
+        if indent == 0:
+            flush()
+            key, in_packages = None, line == "packages:"
+            continue
+        if not in_packages:
+            continue
+        if indent == 2 and line.endswith(":"):
+            flush()
+            key, resolution, version, in_resolution = line[:-1], {}, "", False
+        elif key is None:
+            continue
+        elif indent == 4:
+            in_resolution = False
+            field, _, value = line.partition(":")
+            value = value.strip()
+            if field == "resolution":
+                if value.startswith("{"):
+                    resolution = {k: _unquote(v) for k, v in _FLOW_PAIR.findall(value)}
+                else:
+                    in_resolution = True   # 字下げして並べる形
+            elif field == "version":
+                version = _unquote(value)
+        elif indent >= 6 and in_resolution:
+            field, _, value = line.partition(":")
+            resolution[field.strip()] = _unquote(value)
+    flush()
+    return _collapse(out)
+
+
+def _yarn_entries(text: str):
+    """(見出し, {項目: 値}) を順に返す。従来の形式は「項目 値」、yarn 2 以降は「項目: 値」"""
+    key, fields = None, {}
+    for raw in text.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        if not raw.startswith(" "):
+            if key is not None:
+                yield key, fields
+            key, fields = raw.rstrip().rstrip(":"), {}
+        elif key is not None and raw.startswith("  ") and not raw.startswith("   "):
+            m = re.match(r"^([\w-]+):?\s+(.*)$", raw.strip())
+            if m:
+                fields[m.group(1)] = _unquote(m.group(2))
+    if key is not None:
+        yield key, fields
+
+
+_BERRY_LOCAL = ("workspace:", "portal:", "link:", "file:", "patch:", "exec:")
+
+
+def yarn_lock(text: str) -> list[dict]:
+    berry = re.search(r"^__metadata:", text, re.M) is not None
+    out = []
+    for key, f in _yarn_entries(text):
+        if key == "__metadata":
+            continue
+        name = _split_name(_unquote(key.split(",")[0]))[0]
+        version = f.get("version", "")
+        if berry:
+            source = _split_name(f.get("resolution", ""))[1]
+            if not source or source.startswith(_BERRY_LOCAL) or f.get("linkType") == "soft":
+                continue  # 手元のもの・レジストリのものへの手元の修正
+            if not source.startswith("npm:"):
+                out.append(_notice("not-registry", name, version, redact(source)))
+            elif not f.get("checksum"):
+                out.append(_notice("no-integrity", name, version))
+            continue
+        resolved = f.get("resolved", "")
+        if not resolved or resolved.startswith("file:"):
+            continue  # 手元のフォルダ・ワークスペース
+        if not resolved.startswith(NPM_REGISTRIES):
+            out.append(_notice("not-registry", name, version, redact(resolved)))
+        elif not f.get("integrity"):
+            out.append(_notice("no-integrity", name, version))
+    return _collapse(out)
 
 
 # ---- uv.lock
@@ -169,6 +310,10 @@ def uv_lock(text: str, at: datetime) -> list[dict]:
 def _read(name: str, text: str, at: datetime) -> list[dict]:
     if name in ("package-lock.json", "npm-shrinkwrap.json"):
         return package_lock(text)
+    if name == "pnpm-lock.yaml":
+        return pnpm_lock(text)
+    if name == "yarn.lock":
+        return yarn_lock(text)
     if name == "uv.lock":
         return uv_lock(text, at)
     if name.startswith("requirements") and name.endswith(".txt"):

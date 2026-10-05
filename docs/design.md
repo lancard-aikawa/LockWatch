@@ -206,8 +206,8 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 | `kind` | 対象 | 意味 | `detail` |
 |---|---|---|---|
 | `unpinned` | `requirements*.txt` | 版を `==` で 1 つに固定していない | 書かれている指定（無ければ空） |
-| `not-registry` | `requirements*.txt`・`package-lock.json`・`npm-shrinkwrap.json`・`uv.lock` | レジストリ以外（URL・git など）から取る | 取得元（URL の中の利用者名とパスワードは除く） |
-| `no-integrity` | `package-lock.json`・`npm-shrinkwrap.json` | レジストリから取るのに、ハッシュ（`integrity`）が無い | 空。まとめたときは件数（下） |
+| `not-registry` | `requirements*.txt`・`package-lock.json`・`npm-shrinkwrap.json`・`pnpm-lock.yaml`・`yarn.lock`・`uv.lock` | レジストリ以外（URL・git など）から取る | 取得元（URL の中の利用者名とパスワードは除く） |
+| `no-integrity` | `package-lock.json`・`npm-shrinkwrap.json`・`pnpm-lock.yaml`・`yarn.lock` | レジストリから取るのに、ハッシュ（`integrity`。yarn 2 以降は `checksum`）が無い | 空。まとめたときは件数（下） |
 | `recent` | `uv.lock` | 公開から 7 日たっていない版（`hygiene.RECENT_DAYS`） | 公開の時刻（その版のファイルの `upload-time` の一番古いもの） |
 
 - `unpinned` が要る理由: osv-scanner は、固定していない行を黙って不正確に扱う（2026-10-05 確認）。
@@ -218,7 +218,16 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 - `no-integrity` が 1 つの lock ファイルで 20 件（`hygiene.NO_INTEGRITY_MAX`）を超えたら、そのファイルで 1 件にまとめる（`package` は空、`detail` に件数）。
   ハッシュを書かない古い形式（npm 4 までの shrinkwrap など）で、パッケージごとに並べても意味が無いため（2026-10-05、手元の 1 ファイルから 577 件出た）
 - `recent` は、手元の cooldown（uv の `exclude-newer`）が効いている PC で作った lock ファイルでは出ない。別の PC や他の人が作った lock ファイルの見張り
-- 読めるものだけ読む: `pnpm-lock.yaml`・`yarn.lock` は見ない（標準ライブラリに YAML の読み手が無い）。壊れていて読めないファイルは飛ばす（照合の側で osv-scanner が失敗する）
+- `pnpm-lock.yaml` と `yarn.lock` は、**要る項目だけを行ごとに読む**（標準ライブラリに YAML の読み手が無く、実行時の依存も足さないため。YAML として全部を解釈はしない）
+  - `pnpm-lock.yaml`: `packages:` の節の 1 件ごとに `resolution` を見る（1 行に書く形 `{integrity: ..., tarball: ...}` と、字下げして並べる形の両方）。
+    `tarball` がレジストリ以外、または `type: git`・`repo` があれば `not-registry`。`directory` は手元のフォルダなので入れない。`integrity` が無ければ `no-integrity`。
+    名前と版は見出しから取る（形式 9・6 の `名前@版`、形式 5 の `/名前/版`。`(react@18...)` のような付け足しは落とす）
+  - `yarn.lock`（従来の形式）: 1 件ごとに `resolved` と `integrity` を見る。`resolved` がレジストリ以外なら `not-registry`、`integrity` が無ければ `no-integrity`
+  - `yarn.lock`（yarn 2 以降。`__metadata:` がある）: `resolution` の `名前@種類:...` の種類を見る。`npm:` はレジストリ、`workspace:`・`portal:`・`link:`・`file:` は手元、
+    `patch:` はレジストリのものへの手元の修正なので入れない。それ以外（`https:`・`git@`・`github:` など）は `not-registry`。レジストリのものに `checksum` が無ければ `no-integrity`
+  - 手元の実物（2026-10-05、pnpm の形式 6.0 と 9.0 が 9 個、yarn の従来の形式が 4 個、計 4,000 件あまり）では、すべてレジストリから取得・ハッシュありで 0 件だった。
+    yarn 2 以降の形式は手元に実物が無く、テストの見本でだけ確かめている
+- 読めるものだけ読む: `bun.lock` などほかの lock ファイルは見ない。壊れていて読めないファイルは飛ばす（照合の側で osv-scanner が失敗する）
 - 入れるのは `status` が `ok` のリポジトリだけ（ほかは空）。**キャッシュには入れず、照合のたびに読み直す**（`recent` は日がたつと消えるため。読むだけなので速い）
 - 前回から新しく出た注意は、`latest.json` の `new_notices` に入れる（脆弱性の `new` とは別の配列。`new` の形は変えない）:
   `[{"repo", "lockfile", "kind", "package", "version"}, ...]`。前回の `latest.json` に無かった `(repo, lockfile, kind, package, version)` の組
@@ -452,8 +461,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 - 所属する組織のリポジトリを対象に入れるか（入れても private なのでオフライン）
 - 新しく出たものの知らせ方（RepoTether の表示だけか、Windows の通知も出すか）
 - Gogs で木の一覧を再帰的に取れるか（RepoTether 側の話）
-- 注意（§3.5）: 社内の npm レジストリを「レジストリ」に足す設定、`recent` の日数の設定、
-  `pnpm-lock.yaml`・`yarn.lock` を読むか
+- 注意（§3.5）: 社内の npm レジストリを「レジストリ」に足す設定、`recent` の日数の設定、`bun.lock` を読むか
 - `exclude_dirs` をリポジトリごとに変えられるようにするか（今は全体で 1 つ）
 - **保留（2026-10-03）**: Flutter の Android 側（Gradle の依存）を照合するか。osv-scanner は `gradle.lockfile`（Maven）を読めて、検出も確かめた。
   ただし Flutter の雛形は依存を固定しないので、各プロジェクトで `gradle.lockfile` を作って git に入れるか、LockWatch が Gradle を動かして作る必要がある
