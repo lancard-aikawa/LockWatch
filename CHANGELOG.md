@@ -11,6 +11,7 @@
     見出しを押すとその列で並べ替える。絞り込んだまま印刷すると、表示している行だけが印刷される
   - 画面の「結果」タブの「診断書を出す」からも作れる（「隠す」の選択を引き継ぎ、終わったら一覧を開く）
 - `scripts\lockwatch-gui.cmd`: 画面を開く（ダブルクリックで開ける）
+- `run-lockwatch.bat`: リポジトリの直下に置いた、画面を開くための入口（ダブルクリックで開く。`scripts\lockwatch-gui.cmd` を呼ぶだけ）
 - 定期実行で黒い窓が開いていたのを直す。uv 0.11 の `.venv\Scripts\pythonw.exe` はコンソール用だったため、
   本体の Python の `pythonw.exe` で `scripts\lockwatch-launch.py` を動かすようにした。**`scripts\register-task.ps1` で登録し直す**
 - `scripts\register-task.ps1` と `scripts\lockwatch-gui.cmd` が `.venv` の無い環境で止まっていたのを直す。`scripts\find-pythonw.ps1` が Python 3.10 以上を探す（`.venv`、`uv python find`、`py`、PATH の `python` の順）

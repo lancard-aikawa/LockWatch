@@ -14,8 +14,11 @@ class ScriptEncodingTest(unittest.TestCase):
                 self.assertNotIn(b"\n", raw.replace(b"\r\n", b""), f"{p.name} は CRLF にする")
 
     def test_cmd_is_ascii_crlf(self):
-        # cmd は UTF-8 や LF だけのバッチを読み違える
-        for p in SCRIPTS.glob("*.cmd"):
+        # cmd は UTF-8 や LF だけのバッチを読み違える。リポジトリ直下の起動用の .bat（run-lockwatch.bat）も同じ
+        root = SCRIPTS.parent
+        batches = [*SCRIPTS.glob("*.cmd"), *SCRIPTS.glob("*.bat"), *root.glob("*.cmd"), *root.glob("*.bat")]
+        self.assertIn(root / "run-lockwatch.bat", batches)
+        for p in batches:
             raw = p.read_bytes()
             with self.subTest(p.name):
                 self.assertTrue(raw.isascii(), f"{p.name} は ASCII だけにする")

@@ -45,7 +45,8 @@
 画面で使うなら:
 
 ```cmd
-scripts\lockwatch-gui.cmd    :: 状態・結果・設定の画面（ダブルクリックでも開く。黒い窓は出ない）
+run-lockwatch.bat            :: 状態・結果・設定の画面（このフォルダの直下。ダブルクリックで開く。黒い窓は残らない）
+scripts\lockwatch-gui.cmd    :: 同じもの（run-lockwatch.bat はこれを呼ぶだけ）
 ```
 
 uv 0.11 が作る `.venv\Scripts\pythonw.exe` はコンソール用の `python.exe` と同じもので、そこから開くと黒い窓も開く。
