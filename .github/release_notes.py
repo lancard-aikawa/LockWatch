@@ -40,6 +40,11 @@ def main(tag: str, out: str) -> int:
 
 
 if __name__ == "__main__":
+    # 表示は日本語。GitHub のランナーのコンソールは cp1252 で、そのままでは書けずに落ちる
+    # （2026-10-05、v0.3.0 のタグで release.yml が失敗した）。コンソールの文字コードに頼らない
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     if len(sys.argv) != 3:
         print(__doc__)
         sys.exit(2)
