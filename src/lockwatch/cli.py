@@ -137,7 +137,7 @@ def _note(f: dict) -> str:
 def _print_findings(findings: list[dict]) -> None:
     order = {s: i for i, s in enumerate(fold.SEVERITIES)}
     for f in sorted(findings, key=lambda f: (order.get(f["severity"], 99), f["package"], f["id"])):
-        fixed = ", ".join(f["fixed"]) or "-"
+        fixed = fold.fixed_text(f) or "-"
         note = _note(f)
         print(f"  {f['severity']:<8} {f['package']} {f['version']}  {f['id']}{note}  直る版 {fixed}  （{f['lockfile']}）")
 

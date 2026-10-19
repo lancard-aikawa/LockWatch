@@ -83,7 +83,7 @@ def result_rows(latest: dict | None, hide: set[str], new_only: bool, text: str) 
             if needle and not any(needle in str(x).lower() for x in (rid, f.get("package"), f.get("id"))):
                 continue
             rows.append((rid, f.get("package", ""), f.get("version", ""), f.get("severity", "unknown"), f.get("id", ""),
-                         ", ".join(f.get("fixed") or []), "malicious" if f.get("malicious") else f.get("informational") or "",
+                         fold.fixed_text(f), "malicious" if f.get("malicious") else f.get("informational") or "",
                          f.get("lockfile", "")))
     rows.sort(key=lambda r: (order.get(r[3], 99), r[0], r[1], r[4]))
     return rows

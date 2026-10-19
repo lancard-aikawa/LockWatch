@@ -146,6 +146,13 @@ class RenderTest(unittest.TestCase):
         self.assertIn('<span class="mono">pillow 1.0</span> を <strong class="mono">12.3.0</strong> 以上に上げる', page2)
         self.assertNotIn("「版を固定する」について:", page2)
         self.assertIn("直る版がまだ無いもの: PYSEC-3", page)
+        last = {**pinned, "findings": [{**finding("hcs", "GHSA-ch52", "high", fixed=()), "last_affected": ["4.2.0"]}]}
+        page3 = htmlreport.render_repo("r", last, LATEST, new_ids=set(), n_hidden=0, hide=set(), made_at=self.made_at)
+        self.assertIn('<span class="mono">hcs 1.0</span> を <strong class="mono">4.2.0</strong> より新しい版に上げる', page3)
+        self.assertIn("直った版の番号が記録に無いもの（記録にあるのは影響を受ける最後の版）: GHSA-ch52。新しい版が出ているかを確かめる", page3)
+        self.assertIn('data-fixed="1"', page3)
+        self.assertIn('<td class="mono">4.2.0 より後</td>', page3)
+        self.assertNotIn("直る版がまだ無いもの", page3)
         self.assertIn("実際に入っている版のものではありません", page)
         self.assertIn('<span class="mono">Pillow&gt;=12.2.0</span>', page)
         # 機械で読むためのデータ。HTML を壊す文字は入れない

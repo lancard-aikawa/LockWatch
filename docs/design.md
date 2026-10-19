@@ -122,6 +122,7 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
           "severity": "high",
           "score": 7.5,
           "fixed": ["6.0.9"],
+          "last_affected": [],
           "informational": null,
           "malicious": false,
           "summary": "..."
@@ -145,6 +146,10 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
   （そのまま入れると 180 MB になった）。詳しくは `https://osv.dev/vulnerability/<id>` を開けば済む
 - 1 件は osv-scanner の `groups` の 1 つ（別名どうしの記録をまとめたもの）。`id` は `groups.ids` の先頭、`aliases` は残りの別名
 - `fixed` は、そのパッケージの `affected.ranges` の `fixed` を集めたもの。`GIT` の範囲（値がコミットのハッシュ）は入れない
+- `last_affected` は、同じく `affected.ranges` の `last_affected`（「この版まで影響を受ける」。直った版の番号は書かれていない）を集めたもの。
+  `GIT` の範囲は入れない。OSV の記録には `fixed` が無く `last_affected` だけのものがあり（2026-10-19、`http-cache-semantics` の
+  GHSA-ch52-4w7c-c8xp は「4.2.0 まで」とだけあり、4.3.0 は出ていた）、`fixed` だけを見ると「直る版なし」と誤って出る。
+  表示では `fixed` が無ければ「4.2.0 より後」と出し、直る版があるものとして数える。0.3.0 までの `latest.json` には無い。無ければ空として扱う
 - `score` は osv-scanner が CVSS から計算した `groups.max_severity`（空なら `null`）
 - `severity` は、記録に付いた区分（`database_specific.severity`、GitHub の勧告の `CRITICAL` / `HIGH` / `MODERATE` / `LOW`）を優先する。
   `MODERATE` は `medium`。束の中に複数あれば一番重いもの
@@ -401,6 +406,9 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
      - 1 件ごとに、直る版（`fixed`）のうち今の版より新しい一番小さいものを取り、そのパッケージの全件の中で一番大きいものを目安にする
        （`django 2.2.0` で `[1.11.28, 2.2.10, 3.0.3]` と `[4.2.26, 5.1.14, 5.2.8]` なら 4.2.26）。新しい版は古い修正も含む、という前提の目安で、保証ではない
      - 版は数字と `.` だけのものを比べる（`1.2b1` などは比べない）。比べられないものは「直る版を確かめる」として ID を並べる。直る版が無いものも ID を並べる
+     - `fixed` から上げる先が決まらず `last_affected` があるものは、そのうち今の版以上で一番小さいものを取り、「その版より新しい版に上げる」とする
+       （LockWatch はレジストリに版を問い合わせないので、上げる先の版の番号は出せない）。`fixed` から決まった目安と両方あれば、
+       厳しい方（`last_affected` が目安以上ならそちら）を出す。ID は「直った版の番号が記録に無いもの」として並べ、新しい版が出ているかを確かめるように書く
      - 版を固定していない行のパッケージには、先に `pin` をするように書く
      - 知らせ（`informational`。保守終了など）は上げても直らないので入れない
   4. `review`: 残りの注意（レジストリ以外から取得・ハッシュなし・公開直後の版）

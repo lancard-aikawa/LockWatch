@@ -13,7 +13,7 @@ def hidden(f: dict, hide: set[str]) -> bool:
     return f.get("severity") in hide or f.get("informational") in hide
 
 # 畳み方の版。finding の作り方を変えたら上げる（キャッシュの鍵に入り、古い畳み方のキャッシュを使わなくなる）
-SHAPE = 5
+SHAPE = 6
 
 MALICIOUS_PREFIX = "MAL-"   # OpenSSF の malicious-packages の記録（悪意あるコード）
 
@@ -74,13 +74,22 @@ def _unique(items) -> list:
     return out
 
 
-def _fixed(vulns: list[dict], name: str) -> list[str]:
-    """直る版。そのパッケージの affected の ranges から fixed を集める。
-    GIT の範囲の fixed はコミットのハッシュなので入れない"""
+def _events(vulns: list[dict], name: str, key: str) -> list[str]:
+    """そのパッケージの affected の ranges から、events の key（fixed / last_affected）を集める。
+    GIT の範囲の値はコミットのハッシュなので入れない"""
     affected = [a for v in vulns for a in v.get("affected") or []]
     mine = [a for a in affected if (a.get("package") or {}).get("name") == name] or affected
-    return _unique(ev["fixed"] for a in mine for r in a.get("ranges") or [] if r.get("type") != "GIT"
-                   for ev in r.get("events") or [] if "fixed" in ev)
+    return _unique(ev[key] for a in mine for r in a.get("ranges") or [] if r.get("type") != "GIT"
+                   for ev in r.get("events") or [] if key in ev)
+
+
+def fixed_text(f: dict) -> str:
+    """表示する直る版。fixed が無く last_affected だけなら「その版より後」"""
+    if f.get("fixed"):
+        return ", ".join(f["fixed"])
+    if f.get("last_affected"):
+        return ", ".join(f["last_affected"]) + " より後"
+    return ""
 
 
 def path_key(path: str | os.PathLike) -> str:
@@ -121,7 +130,8 @@ def by_source(data: dict) -> dict[str, list[dict]]:
                     "aliases": [a for a in _unique([*(g.get("aliases") or []), *ids]) if a != vid],
                     "severity": sev,
                     "score": score,
-                    "fixed": _fixed(mine, name),
+                    "fixed": _events(mine, name, "fixed"),
+                    "last_affected": _events(mine, name, "last_affected"),
                     "informational": _informational(mine, name),
                     "malicious": malicious,
                     "summary": next((v["summary"] for v in mine if v.get("summary")), ""),

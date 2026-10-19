@@ -29,6 +29,14 @@ def _needed(current: tuple[int, ...] | None, fixed: list[str]) -> str | None:
     return min(newer)[1] if newer else None
 
 
+def _above(current: tuple[int, ...] | None, last_affected: list[str]) -> str | None:
+    """その 1 件の影響を受ける最後の版のうち、今の版以上の一番小さいもの（それより新しい版に上げれば直る）"""
+    if current is None:
+        return None
+    hit = [(p, v) for v in last_affected for p in [parse_version(v)] if p is not None and p >= current]
+    return min(hit)[1] if hit else None
+
+
 def _upgrades(findings: list[dict], unpinned: set[tuple[str, str]]) -> list[dict]:
     order = {s: i for i, s in enumerate(fold.SEVERITIES)}
     groups: dict[tuple, list[dict]] = {}
@@ -39,22 +47,34 @@ def _upgrades(findings: list[dict], unpinned: set[tuple[str, str]]) -> list[dict
     out = []
     for (lockfile, ecosystem, package, version), items in groups.items():
         current = parse_version(version)
-        needs, unfixed, unclear = [], [], []
+        needs, aboves, unfixed, unclear, by_last = [], [], [], [], []
         for f in items:
-            fixed = f.get("fixed") or []
+            fixed, last = f.get("fixed") or [], f.get("last_affected") or []
             need = _needed(current, fixed)
+            above = None if need is not None else _above(current, last)
             if need is not None:
                 needs.append(need)
-            elif not fixed:
+            elif above is not None:
+                aboves.append(above)
+                by_last.append(f.get("id", ""))
+            elif not fixed and not last:
                 unfixed.append(f.get("id", ""))
             else:
                 unclear.append(f.get("id", ""))
+        target = max(needs, key=parse_version) if needs else None
+        above = max(aboves, key=parse_version) if aboves else None
+        if above is not None and target is not None:
+            # 厳しい方だけを出す（above より新しければ target 以上でもある、またはその逆）
+            if parse_version(above) >= parse_version(target):
+                target = None
+            else:
+                above = None
         counts = {s: sum(1 for f in items if f.get("severity") == s) for s in fold.SEVERITIES}
         out.append({
             "action": "upgrade", "lockfile": lockfile, "ecosystem": ecosystem, "package": package, "version": version,
-            "target": max(needs, key=parse_version) if needs else None,
+            "target": target, "above": above,
             "count": len(items), "severities": {s: n for s, n in counts.items() if n},
-            "unfixed": sorted(unfixed), "unclear": sorted(unclear),
+            "unfixed": sorted(unfixed), "unclear": sorted(unclear), "by_last_affected": sorted(by_last),
             "unpinned": (lockfile, package.lower()) in unpinned,
         })
     out.sort(key=lambda a: (min(order.get(s, 99) for s in a["severities"]), -a["count"], a["lockfile"], a["package"].lower()))

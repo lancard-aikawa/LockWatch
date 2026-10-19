@@ -50,6 +50,25 @@ class UpgradeTest(unittest.TestCase):
         b = self.one([finding("q", "main", "A", "high", ["1.0"])])         # 今の版が比べられない
         self.assertEqual((b["target"], b["unclear"]), (None, ["A"]))
 
+    def test_last_affected_gives_a_lower_bound(self):
+        # 直った版が書かれず「この版まで影響」だけ。レジストリは引かないので「その版より新しい版」とだけ言う
+        a = self.one([finding("http-cache-semantics", "4.2.0", "GHSA-ch52", "high", [], last_affected=["4.2.0"])])
+        self.assertEqual((a["target"], a["above"], a["by_last_affected"], a["unfixed"], a["unclear"]),
+                         (None, "4.2.0", ["GHSA-ch52"], [], []))
+        b = self.one([finding("p", "2.0.1", "A", "high", [], last_affected=["1.4.2", "2.0.5", "3.1"])])
+        self.assertEqual(b["above"], "2.0.5")  # 今の版以上で一番小さいもの
+        c = self.one([finding("p", "2.0", "A", "high", [], last_affected=["1.9"]),   # 今の版より古い
+                      finding("p", "2.0", "B", "high", [], last_affected=["2.0rc1"])])  # 比べられない
+        self.assertEqual((c["above"], c["unclear"], c["unfixed"]), (None, ["A", "B"], []))
+
+    def test_stricter_of_fixed_and_last_affected_wins(self):
+        a = self.one([finding("p", "1.0", "A", "high", ["1.5"]), finding("p", "1.0", "B", "high", [], last_affected=["2.0"])])
+        self.assertEqual((a["target"], a["above"]), (None, "2.0"))   # 2.0 より新しければ 1.5 以上でもある
+        b = self.one([finding("p", "1.0", "A", "high", ["2.1"]), finding("p", "1.0", "B", "high", [], last_affected=["2.0"])])
+        self.assertEqual((b["target"], b["above"], b["by_last_affected"]), ("2.1", None, ["B"]))
+        c = self.one([finding("p", "1.0", "A", "high", ["1.1"], last_affected=["9.0"])])  # fixed から決まれば fixed を使う
+        self.assertEqual((c["target"], c["above"], c["by_last_affected"]), ("1.1", None, []))
+
     def test_same_package_in_two_lockfiles_is_two_actions(self):
         acts = advice.actions([finding("p", "1.0", "A", "low", ["1.1"]),
                                finding("p", "1.0", "A", "low", ["1.1"], lockfile="sub/uv.lock"),

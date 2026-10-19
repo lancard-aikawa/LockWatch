@@ -35,7 +35,7 @@ class BySourceTest(unittest.TestCase):
     def test_finding_shape(self):
         f = self.one("pub/pnpm-lock.yaml")
         self.assertEqual(set(f), {"lockfile", "ecosystem", "package", "version", "id", "aliases",
-                                  "severity", "score", "fixed", "informational", "malicious", "summary"})
+                                  "severity", "score", "fixed", "last_affected", "informational", "malicious", "summary"})
         self.assertIsNone(f["informational"])
         self.assertIs(f["malicious"], False)
         self.assertEqual((f["package"], f["version"], f["ecosystem"]), ("vite", "6.0.1", "npm"))
@@ -92,6 +92,20 @@ class BySourceTest(unittest.TestCase):
             "vulnerabilities": [{"id": "GHSA-x"}]}]}]}
         (f,) = fold.by_source(data)[fold.path_key("C:/r/x/package-lock.json")]
         self.assertEqual((f["malicious"], f["severity"], f["score"]), (True, "medium", 5.0))
+
+    def test_last_affected_is_kept_beside_fixed(self):
+        # 直った版が書かれず「この版まで影響」だけの記録（2026-10-19 の http-cache-semantics、GHSA-ch52-4w7c-c8xp）
+        data = {"results": [{"source": {"path": "C:/r/x/pnpm-lock.yaml"}, "packages": [{
+            "package": {"name": "http-cache-semantics", "version": "4.2.0", "ecosystem": "npm"},
+            "groups": [{"ids": ["GHSA-ch52-4w7c-c8xp"], "aliases": [], "max_severity": "8.7"}],
+            "vulnerabilities": [{"id": "GHSA-ch52-4w7c-c8xp", "affected": [{"package": {"name": "http-cache-semantics"}, "ranges": [
+                {"type": "SEMVER", "events": [{"introduced": "0"}, {"last_affected": "4.2.0"}]},
+                {"type": "GIT", "events": [{"introduced": "0"}, {"last_affected": "abc123"}]}]}]}]}]}]}
+        (f,) = fold.by_source(data)[fold.path_key("C:/r/x/pnpm-lock.yaml")]
+        self.assertEqual((f["fixed"], f["last_affected"]), ([], ["4.2.0"]))  # GIT の範囲は入れない
+        self.assertEqual(fold.fixed_text(f), "4.2.0 より後")
+        self.assertEqual(fold.fixed_text({"fixed": ["1.1"], "last_affected": ["1.0"]}), "1.1")
+        self.assertEqual(fold.fixed_text({"fixed": []}), "")  # 0.3.0 までの結果には last_affected が無い
 
     def test_packages_by_source_lists_everything(self):
         out = fold.packages_by_source(load("osv_all.json"))

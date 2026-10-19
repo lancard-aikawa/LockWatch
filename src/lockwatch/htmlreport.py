@@ -276,7 +276,7 @@ def render_repo(rid: str, entry: dict, latest: dict, *, new_ids: set[tuple[str, 
         out.append("<h2>結果</h2>\n<p>調べる対象の lock ファイルがありませんでした。</p>")
     else:
         n_new = sum(1 for f in findings if (f.get("package"), f.get("id")) in new_ids)
-        n_fixed = sum(1 for f in findings if f.get("fixed"))
+        n_fixed = sum(1 for f in findings if fold.fixed_text(f))
         n_mal = sum(1 for f in findings if f.get("malicious"))
         out.append("<h2>要約</h2>")
         if n_mal:
@@ -348,16 +348,27 @@ def _action_item(a: dict) -> str:
     if kind == "upgrade":
         counts = "・".join(f"{SEVERITY_LABEL.get(s, s)} {n}" for s, n in a["severities"].items())
         target = f'<strong class="mono">{_e(a["target"])}</strong>' if a["target"] else ""
+        above = f'<strong class="mono">{_e(a["above"])}</strong>' if a.get("above") else ""
         extra = []
         if a["unpinned"]:
             # 版は書かれた下限で、実際に入っている版ではない。「この版から上げる」とは書かない
             name = f'<span class="mono">{_e(a.get("package"))}</span>（書かれた下限は <span class="mono">{_e(a.get("version"))}</span>）'
-            head = f"{name}は、実際の版が {target} より古ければ {target} 以上に上げる" if target else f"{name}は、上げる先の版を確かめる"
+            if target:
+                head = f"{name}は、実際の版が {target} より古ければ {target} 以上に上げる"
+            elif above:
+                head = f"{name}は、実際の版が {above} 以下なら {above} より新しい版に上げる"
+            else:
+                head = f"{name}は、上げる先の版を確かめる"
             extra.append("版が固定されていないので、先に上の「版を固定する」を行い、実際の版を確かめる")
         elif target:
             head = f"{_pkg(a)} を {target} 以上に上げる"
+        elif above:
+            head = f"{_pkg(a)} を {above} より新しい版に上げる"
         else:
             head = f"{_pkg(a)} は、上げる先の版を確かめる"
+        if a.get("by_last_affected"):
+            extra.append("直った版の番号が記録に無いもの（記録にあるのは影響を受ける最後の版）: "
+                         + "、".join(_e(i) for i in a["by_last_affected"]) + "。新しい版が出ているかを確かめる")
         if a["unclear"]:
             extra.append("直る版を確かめるもの: " + "、".join(_e(i) for i in a["unclear"]))
         if a["unfixed"]:
@@ -406,7 +417,7 @@ def _findings_table(findings: list[dict], new_ids: set[tuple[str, str]]) -> str:
             tags.append(f'<span class="tag mal">{MALICIOUS_LABEL}</span>')
         if f.get("informational"):
             tags.append(f'<span class="tag">{_e(INFORMATIONAL_LABEL.get(f["informational"], f["informational"]))}</span>')
-        fixed = ", ".join(f.get("fixed") or [])
+        fixed = fold.fixed_text(f)
         # 深刻度の列の並べ替えの鍵: 重い順、同じ深刻度なら点数の高い順
         rank = fold.SEVERITIES.index(sev) * 1000 + round((10 - (score if isinstance(score, (int, float)) else 0)) * 10)
         is_new = (f.get("package"), vid) in new_ids
