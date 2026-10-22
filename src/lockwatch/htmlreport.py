@@ -278,6 +278,8 @@ def _runtime_fix(r: dict) -> str:
         return ("版を確定すると分かります" + (f'（系列の最新は <span class="mono">{_e(latest)}</span>）' if latest else ""))
     if r.get("upgrade_to"):
         return f'<span class="mono">{_e(r["upgrade_to"])}</span> が出ています（セキュリティリリースではない）'
+    if r.get("status") == "ended":
+        return "この系列の最後の版です（これ以上の修正は出ません。新しい系列に上げてください）"
     return '<span class="ok">最新</span>' if r.get("latest") else '<span class="muted">分かりません</span>'
 
 

@@ -144,6 +144,9 @@ class CheckTest(unittest.TestCase):
         self.assertIn("サポート終了", html)
         self.assertIn("https://nodejs.org/en/blog/release/v22.23.4", html)
         self.assertIn("PHP 8.1 終了", html)
+        last = runtimes.check("php", "8.1.34", "x", True, self.rt, TODAY)  # 終わった系列の最後の版
+        self.assertIn("この系列の最後の版", htmlreport._runtime_fix(last))
+        self.assertNotIn("最新", htmlreport._runtime_fix(last))
         bad = [{**rs[0], "source": "<script>x</script>"}]
         self.assertNotIn("<script>x", htmlreport._runtimes_section(bad))
 
