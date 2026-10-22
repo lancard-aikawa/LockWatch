@@ -4,6 +4,10 @@
 
 ## 未公開
 
+- 言語そのもの（PHP・Node.js）の版を調べる（design.md §3.6）。リポジトリの `.php-version`・`.nvmrc`・Dockerfile・composer.json の `require.php`・`package.json` の `engines.node` などから版の見当を付け（RepoTether で確定した版があればそれ）、
+  系列のサポート終了（90 日以内の終了も）と、入れた版より新しいセキュリティリリースを出す。言語そのものの脆弱性は OSV に本家の版ではまとまって載らないので、
+  endoflife.date・php.net・nodejs.org から言語の情報だけを取る（リポジトリの情報は送らない）。診断書に「言語」の節、一覧に「言語」の列、社員向けの一覧に「言語のセキュリティのお知らせ」の欄。
+  設定 `runtime_check` で切れる
 - 社員向けの一覧（`report --share`）: targets.json で `share`（見出し）の付いたリポジトリだけを、見出しごとに 1 つの表に並べた一覧と、その診断書を `<data>/share` に書く。
   何の一覧か・作り方（RepoTether と LockWatch）・載せているもの・読み方の案内と、各リポジトリの最新の発行日を入れる
 - targets.json に `share`（社員向けの一覧での見出し）と `retired`（廃止。照合しない）を足した。`retired` のものは照合せず、`scan --id` で選ぶと誤りにする

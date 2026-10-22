@@ -56,7 +56,7 @@ class ScanTest(unittest.TestCase):
         exe = self.dir / "osv-scanner.exe"
         exe.write_text("", encoding="utf-8")
         cfg = self.dir / "lockwatch.json"
-        cfg.write_text(json.dumps({"osv_scanner": str(exe)}), encoding="utf-8")
+        cfg.write_text(json.dumps({"osv_scanner": str(exe), "runtime_check": False}), encoding="utf-8")
         self.base = ["--config", str(cfg), "--data", str(self.data)]
         self.mkrepo("pub", {"pnpm-lock.yaml": "a", "node_modules/x/package-lock.json": "ignored"})
         self.mkrepo("priv", {"uv.lock": "b"})

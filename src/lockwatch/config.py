@@ -13,6 +13,7 @@ DEFAULTS: dict = {
     "cache_max_age_hours": 20,
     "keep_results": 30,
     "exclude_dirs": ["vendor", "vendors", "third_party", "third-party", "bower_components", "node_modules"],
+    "runtime_check": True,
 }
 
 
@@ -51,6 +52,7 @@ _PARSERS = {
     "cache_max_age_hours": _parse_positive_int,
     "keep_results": _parse_positive_int,
     "exclude_dirs": _parse_names,
+    "runtime_check": _parse_bool,
 }
 
 

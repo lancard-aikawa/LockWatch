@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import fold, hygiene, lockfiles, osv, store
+from . import fold, hygiene, lockfiles, osv, runtimes, store
 from .targets import Target, split_by_privacy
 
 
@@ -66,7 +66,7 @@ def _prepare(t: Target, mode: str, exclude_dirs=()) -> Job:
 
 def _entry(job: Job, at: datetime | str, status: str, findings: list[dict], error: str | None = None) -> dict:
     """at はキャッシュから返すときは保存した時刻（照合した時刻）"""
-    e = {"status": status, "visibility": job.target.visibility, "mode": job.mode, "scanned_at": at if isinstance(at, str) else store.iso(at), "lockfiles": job.lockfiles, "excluded": job.excluded, "findings": findings, "notices": []}
+    e = {"status": status, "visibility": job.target.visibility, "mode": job.mode, "scanned_at": at if isinstance(at, str) else store.iso(at), "lockfiles": job.lockfiles, "excluded": job.excluded, "findings": findings, "notices": [], "runtimes": []}
     if error:
         e["error"] = error
     return e
@@ -128,8 +128,9 @@ def check(target: Target, *, data: Path, cfg: dict, scanner_version: str, at: da
 
 
 def run(targets: list[Target], *, data: Path, cfg: dict, exe: str, scanner_version: str,
-        at: datetime, force_db_update: bool = False, use_cache: bool = True) -> Outcome:
-    """use_cache が False なら、キャッシュを読まずに照合し直す（書くのはいつもどおり）"""
+        at: datetime, force_db_update: bool = False, use_cache: bool = True, runtime_data: dict | None = None) -> Outcome:
+    """use_cache が False なら、キャッシュを読まずに照合し直す（書くのはいつもどおり）。
+    runtime_data は言語のデータ（runtimes.load_or_fetch）。None なら言語は版だけを出す"""
     jobs = _jobs(targets, cfg)
     entries: dict[str, dict] = {}
     packages: dict[str, list[list[str]]] = {}
@@ -229,6 +230,10 @@ def run(targets: list[Target], *, data: Path, cfg: dict, exe: str, scanner_versi
     for job in todo:
         if entries[job.target.id]["status"] == "ok":
             entries[job.target.id]["notices"] = hygiene.check(job.root, job.lockfiles, at)
+
+    # 言語そのものの版（design.md §3.6）。lock ファイルの無いリポジトリでも見る。キャッシュには入れない
+    for job in jobs:
+        entries[job.target.id]["runtimes"] = runtimes.check_target(job.root, job.target.runtimes, runtime_data, at)
 
     times = [t for t in (store.parse_time(db_state.get(e)) for e in db_used) if t is not None]
     return Outcome(repos={j.target.id: entries[j.target.id] for j in jobs},

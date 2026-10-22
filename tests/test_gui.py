@@ -88,7 +88,8 @@ class RowsTest(unittest.TestCase):
 
     def test_validate_uses_config_rules(self):
         good = {"online_public": "false", "data_dir": "", "targets": "", "osv_scanner": "C:/x/osv-scanner.exe",
-                "parallel": "2", "db_max_age_days": "7", "cache_max_age_hours": "20", "keep_results": "30"}
+                "parallel": "2", "db_max_age_days": "7", "cache_max_age_hours": "20", "keep_results": "30",
+                "runtime_check": "true"}
         values, errors = gui.validate(good)
         self.assertEqual(errors, [])
         self.assertEqual((values["online_public"], values["parallel"], values["data_dir"]), (False, 2, None))

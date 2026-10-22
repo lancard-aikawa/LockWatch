@@ -122,7 +122,7 @@ class RenderTest(unittest.TestCase):
         self.assertNotIn("lock ファイルの注意", self.render("github.com/example/web-app"))  # notices の無い古い結果
         index = htmlreport.render_index({"r": entry}, LATEST, {"r": "r"}, n_new=0, n_hidden=0, hide=set(), made_at=self.made_at)
         self.assertIn(">注意</button></th>", index)
-        self.assertIn('<td class="num">2</td></tr>', index)
+        self.assertIn('<td class="num">2</td><td>', index)
 
     def test_actions_section_and_data_block(self):
         entry = {"status": "ok", "visibility": "private", "mode": "offline", "scanned_at": "2026-10-05T12:00:00+09:00",

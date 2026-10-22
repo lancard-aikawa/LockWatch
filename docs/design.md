@@ -67,6 +67,7 @@
 - `fetched_path` はデータフォルダからの相対パスか絶対パス。中身は元のリポジトリと同じパスで lock ファイルだけを置く
   （osv-scanner はファイル名で形式を決めるので、名前もパスも変えない）
 - `share`: 社員向けの一覧（§7.2）に載せるときの見出し（`gogs.example.com`、`github.com/example` など）。`null` か無ければ載せない。空の文字は誤り
+- `runtimes`: RepoTether で確定した言語の版（§3.6）。`{"php": "8.2.20", "node": "22.23.1"}`。キーは `php` / `node` だけ。無ければ見当で決める
 - `retired`: `true` なら照合しない（更新しないと決めたもの）。全部を照合したときは結果からも外れ、`scan --id` で選ぶと誤りにする。
   `share` もあれば、社員向けの一覧の「廃止」の欄に名前だけ出す。無ければ `false`
 - 知らないキーは無視する（RepoTether が先に新しい項目を書いても壊れない）
@@ -256,6 +257,31 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 - `--hide` は効かない
 - 並びは lock ファイル・`kind`・名前・版の順
 - 0.2.0 までの `latest.json` には無い。無ければ空として扱う
+
+### 3.6 言語の版（`runtimes`）
+
+lock ファイルの照合とは別に、言語そのもの（PHP・Node.js）の版を調べる。PHP や Node.js そのものの脆弱性は、OSV には本家の版ではまとまって載らない
+（2026-10-22 に api.osv.dev で確かめた: php-src は OSS-Fuzz の 1 件だけ、nodejs/node は 2025-01 で止まっている。Debian などのパッケージとしては載るが、
+版がディストリビューションのもの）。そこで本家と endoflife.date が出しているものを使う。送るのは言語の名前だけで、リポジトリの情報は送らない（§4 と両立する）。
+
+| 何を | どこから |
+|---|---|
+| 系列（PHP は 8.2、Node.js は 22）ごとのサポート終了日・最新の版 | `https://endoflife.date/api/php.json` / `nodejs.json` |
+| 版ごとの公開日と security の印 | php.net の releases の JSON（`?json&version=8&max=1000` など）/ `https://nodejs.org/dist/index.json`（`security: true`） |
+| セキュリティのお知らせ（題・日付・リンク） | php.net のニュースの Atom（題に Security の入ったもの。予告も含む）/ `https://nodejs.org/en/feed/vulnerability.xml` |
+
+- 取ったものは `<data>/runtimes.json` に置き、`cache_max_age_hours` より新しければ取り直さない。取れなければ前のものを使い、照合の注意に書く（照合は止めない）
+- フィードに DTD・実体の宣言があれば読まない（defusedxml を足せないため）。php.net のリリースの Atom（`releases/feed.php`）は最新 4 件で security の印も無いので使わない
+- 版の決め方（リポジトリの直下だけを見る）:
+  1. `targets.json` の `runtimes`（RepoTether で確定した版。`{"php": "8.2.20"}`）があればそれ
+  2. 版を決め打ちしているファイル: PHP は `.php-version`・Dockerfile の `FROM php:8.2`、Node.js は `.nvmrc`・`.node-version`・`package.json` の `volta.node`・Dockerfile の `FROM node:22`
+  3. 書き方（下限）: composer.json の `require.php`、`package.json` の `engines.node`。`^7.4 || ^8.0` なら一番低い 7.4。**下限なので系列だけを見る**（修正版の有無は言わない）
+- 結果（リポジトリごとの `runtimes`。lock ファイルの無いリポジトリでも出す。キャッシュには入れず毎回）:
+  `name`・`version`・`source`（どこから）・`confirmed`・`lower_bound`・`cycle`・`eol`・`status`（`ok` / `soon` = 90 日以内に終了 / `ended` / `unknown`）・
+  `latest`（系列の最新）・`exact`（3 桁の版で、下限でない）・`security`（同じ系列で、入れた版より新しいセキュリティリリース `[{version, date}]`）・`upgrade_to`
+- 修正版は CVE ごとではなく版の比較で出す（PHP には CVE と影響する版の機械で読める一覧が無い。Node.js の security-wg の一覧は遅れることがある）
+- 設定 `runtime_check: false` なら取りに行かず、言語の結果も出さない
+- 診断書には「言語」の節、一覧と社員向けの一覧には「言語」の列（注意の要るものだけ）、社員向けの一覧には 30 日以内のお知らせの欄を出す
 
 ## 4. private は外に送らない
 
@@ -464,6 +490,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
   "db_max_age_days": 7,
   "cache_max_age_hours": 20,
   "keep_results": 30,
+  "runtime_check": true,
   "exclude_dirs": ["vendor", "vendors", "third_party", "third-party", "bower_components", "node_modules"]
 }
 ```
@@ -473,6 +500,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 - `data_dir`: 空なら `<app>/data`
 - `targets`: 空なら `<data>/targets.json`
 - `keep_results`: `results/` に残す過去の結果の数
+- `runtime_check`: 言語（PHP・Node.js）の版も調べるか（§3.6）。切ると endoflife.date・php.net・nodejs.org に取りに行かない
 
 ## 9. 画面（`lockwatch gui`）
 

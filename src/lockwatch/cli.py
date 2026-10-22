@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import __version__
 from . import config as cfgmod
-from . import fold, htmlreport, hygiene, osv, store
+from . import fold, htmlreport, hygiene, osv, runtimes, store
 from . import packages as pkgmod
 from . import scan as scanmod
 from . import status as statusmod
@@ -242,7 +242,11 @@ def _cmd_scan(args, cfg: dict) -> int:
     try:
         with store.exclusive(data):
             at = store.now()
-            out = scanmod.run(targets, data=data, cfg=cfg, exe=exe, scanner_version=ver, at=at, use_cache=not args.no_cache)
+            rt, rt_warning = runtimes.load_or_fetch(data, cfg, at)
+            out = scanmod.run(targets, data=data, cfg=cfg, exe=exe, scanner_version=ver, at=at, use_cache=not args.no_cache,
+                              runtime_data=rt)
+            if rt_warning:
+                out.warnings.append(rt_warning)
             if not args.repo:
                 _write_scan_results(data, cfg, out, ver, at, only_id=args.id)
             store.cache_prune(data, cfg["cache_max_age_hours"], at)
@@ -378,7 +382,8 @@ def _write_share(args, cfg: dict, data: Path, latest: dict, repos: dict, new: li
     index = out_dir / "index.html"
     htmlreport.write_text(index, htmlreport.render_share_index(
         [(t.share, t.id, repos.get(t.id)) for t in active], [(t.share, t.id) for t in shared if t.retired], latest, names,
-        n_new=sum(1 for n in new if n.get("repo") in ids), n_hidden=n_hidden, hide=hide, made_at=made_at))
+        n_new=sum(1 for n in new if n.get("repo") in ids), n_hidden=n_hidden, hide=hide, made_at=made_at,
+        advisories=runtimes.recent_advisories(runtimes.load(data), made_at)))
     written.append(index)
     # 載せなくなったリポジトリの古いページを消す。LockWatch が書いたもの以外には触れない
     keep = {p.name.lower() for p in written}

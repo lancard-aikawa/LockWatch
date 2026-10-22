@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from . import __version__, advice, fold, hygiene, store
+from . import __version__, advice, fold, hygiene, runtimes, store
 
 GENERATOR = f"LockWatch {__version__}"
 _GENERATOR_MARK = '<meta name="generator" content="LockWatch'
@@ -246,6 +246,71 @@ def _footer(made_at: datetime, n_hidden: int, hide: set[str]) -> str:
     return f"<footer>{' '.join(parts)}</footer>"
 
 
+def _release_url(lang: str, version: str) -> str:
+    if lang == "php":
+        return f"https://www.php.net/ChangeLog-{quote(version.split('.')[0])}.php#{quote(version)}"
+    return f"https://nodejs.org/en/blog/release/v{quote(version)}"
+
+
+def _runtime_status(r: dict) -> str:
+    cyc, eol = _e(r.get("cycle") or "-"), _e(r.get("eol") or "")
+    if r.get("lower_bound"):
+        cyc += "（下限）"
+    if r.get("status") == "ended":
+        return f'<span class="tag mal">サポート終了</span> {cyc}（{eol} に終了）'
+    if r.get("status") == "soon":
+        return f'<span class="tag new">終了が近い</span> {cyc}（{eol} まで）'
+    if r.get("status") == "ok":
+        return f"{cyc}（{eol} まで）" if eol else f"{cyc}（終了日は未定）"
+    return '<span class="muted">分かりません</span>'
+
+
+def _runtime_fix(r: dict) -> str:
+    sec = r.get("security") or []
+    lang = r.get("name", "")
+    if sec:
+        newest = sec[-1]
+        target = r.get("upgrade_to") or newest["version"]
+        return (f'<span class="tag new">修正版あり</span> <a class="mono" href="{_e(_release_url(lang, target))}">{_e(target)}</a> に上げる'
+                f'（この版より後のセキュリティリリース {len(sec)} 件。最新 {_e(newest.get("date") or "-")}）')
+    if not r.get("exact"):
+        latest = r.get("latest")
+        return ("版を確定すると分かります" + (f'（系列の最新は <span class="mono">{_e(latest)}</span>）' if latest else ""))
+    if r.get("upgrade_to"):
+        return f'<span class="mono">{_e(r["upgrade_to"])}</span> が出ています（セキュリティリリースではない）'
+    return '<span class="ok">最新</span>' if r.get("latest") else '<span class="muted">分かりません</span>'
+
+
+def _runtimes_section(rs: list[dict]) -> str:
+    """言語そのものの版（design.md §3.6）"""
+    rows = [
+        f'<tr><td class="nowrap">{_e(runtimes.LABEL.get(r.get("name"), r.get("name")))}</td>'
+        f'<td class="nowrap"><span class="mono">{_e(r.get("version"))}</span> '
+        f'{"<span class=tag>確定</span>" if r.get("confirmed") else "<span class=tag>推定</span>"}</td>'
+        f'<td>{_e(r.get("source"))}</td><td>{_runtime_status(r)}</td><td>{_runtime_fix(r)}</td></tr>'
+        for r in rs
+    ]
+    head = "<tr><th>言語</th><th>版</th><th>どこから</th><th>系列のサポート</th><th>修正版</th></tr>"
+    note = ""
+    if any(not r.get("confirmed") for r in rs):
+        note = ("<p class=\"muted\">推定は、リポジトリのファイル（composer.json の require.php・package.json の engines.node など）からの見当で、"
+                "多くは「この版以上で動く」という下限です。実際に動かしている版を RepoTether の詳細パネルで確定すると、修正版の有無まで分かります。</p>")
+    return ("<h2>言語</h2>\n" + note + '<div class="scroll"><table>\n<thead>' + head + "</thead>\n<tbody>\n"
+            + "\n".join(rows) + "\n</tbody>\n</table></div>")
+
+
+def _runtime_brief(rs: list[dict]) -> str:
+    """一覧の 1 マス: 注意の要る言語だけ"""
+    parts = []
+    for r in rs or []:
+        if not runtimes.needs_attention(r):
+            continue
+        what = "終了" if r.get("status") == "ended" else "終了間近" if r.get("status") == "soon" else "修正版あり"
+        parts.append(f'<span class="tag{" mal" if what == "終了" else " new"}">{_e(runtimes.LABEL.get(r.get("name"), r.get("name")))} '
+                     f'{_e(r.get("cycle") or r.get("version"))} {what}</span>')
+    return " ".join(parts) or '<span class="muted">-</span>'
+
+
 def render_repo(rid: str, entry: dict, latest: dict, *, new_ids: set[tuple[str, str]], n_hidden: int,
                 hide: set[str], made_at: datetime) -> str:
     """1 つのリポジトリの診断書。entry の findings は --hide を当てた後のもの。new_ids は (package, id)"""
@@ -269,6 +334,8 @@ def render_repo(rid: str, entry: dict, latest: dict, *, new_ids: set[tuple[str, 
     if vis != "public":
         out.append('<div class="notice">非公開のリポジトリの依存の一覧を含みます。社外に出さないでください。</div>')
     out.append('<dl class="meta">' + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in meta) + "</dl>")
+    if entry.get("runtimes"):
+        out.append(_runtimes_section(entry["runtimes"]))
 
     if status == "error":
         out.append(f"<h2>照合できませんでした</h2>\n<p class=\"mono\">{_e(entry.get('error') or '理由が記録されていません')}</p>")
@@ -319,7 +386,8 @@ def render_repo(rid: str, entry: dict, latest: dict, *, new_ids: set[tuple[str, 
         out.append(_data_block({
             "format": store.FORMAT, "generator": GENERATOR, "repo": rid, "visibility": vis, "mode": entry.get("mode"),
             "scanned_at": entry.get("scanned_at") or latest.get("scanned_at"),
-            "actions": advice.actions(findings, notices), "findings": findings, "notices": notices}))
+            "actions": advice.actions(findings, notices), "findings": findings, "notices": notices,
+            "runtimes": entry.get("runtimes") or []}))
     return _page(f"脆弱性診断書 {rid}", "\n".join(out))
 
 
@@ -483,11 +551,12 @@ def render_index(repos: dict[str, dict], latest: dict, names: dict[str, str], *,
             f'<tr data-vis="{vis}" data-has="{int(bool(e.get("findings")))}">'
             f'<td><a class="mono path" href="{_e(quote(names[rid]))}.html">{_e(rid)}</a></td>'
             f"<td>{_e(VISIBILITY_LABEL[vis])}</td><td>{_e(STATUS_LABEL.get(status, status))}</td>{cells}"
-            f'<td class="num">{len(e.get("notices") or []) or "<span class=muted>0</span>"}</td></tr>'
+            f'<td class="num">{len(e.get("notices") or []) or "<span class=muted>0</span>"}</td>'
+            f'<td>{_runtime_brief(e.get("runtimes"))}</td></tr>'
         )
     head = ("<tr>" + _th("リポジトリ", "text") + _th("公開の区分", "text") + _th("状態", "text") + "".join(
         _th(f'<span class="sev {s}">{SEVERITY_LABEL[s]}</span>', "num", "num") for s in fold.SEVERITIES)
-        + _th("注意", "num", "num") + "</tr>")
+        + _th("注意", "num", "num") + _th("言語", "text") + "</tr>")
     present = {visibility_of(e) for e in repos.values()}
     private = present != {"public"} and bool(present)
     body = [
@@ -531,8 +600,24 @@ def _newest_published(findings: list[dict]) -> str:
     return max((d for f in findings for d in [_day(f.get("published"))] if d), default="")
 
 
+def _advisories_section(advisories: list[dict], entries: list[tuple[str, str, dict | None]]) -> str:
+    """最近の言語のセキュリティのお知らせと、その言語を使っているリポジトリの数"""
+    if not advisories:
+        return ""
+    using = {lang: sum(1 for _, _, e in entries if any(r.get("name") == lang for r in (e or {}).get("runtimes") or []))
+             for lang in runtimes.LANGS}
+    items = "".join(
+        f'<li><span class="mono">{_e(a.get("date"))}</span> <strong>{_e(runtimes.LABEL.get(a["name"], a["name"]))}</strong> '
+        + (f'<a href="{_e(a["url"])}">{_e(a.get("title"))}</a>' if a.get("url") else _e(a.get("title")))
+        + f' <span class="muted">（{using.get(a["name"], 0)} リポジトリが使用）</span></li>'
+        for a in advisories)
+    return ("<h2>言語のセキュリティのお知らせ（30 日以内）</h2>\n<p>言語そのもの（PHP・Node.js）の脆弱性の知らせです。"
+            "どのリポジトリが当たるかは、下の表の「言語」とリポジトリのページの「言語」を見てください。</p>\n<ul>" + items + "</ul>")
+
+
 def render_share_index(entries: list[tuple[str, str, dict | None]], retired: list[tuple[str, str]], latest: dict,
-                       names: dict[str, str], *, n_new: int, n_hidden: int, hide: set[str], made_at: datetime) -> str:
+                       names: dict[str, str], *, n_new: int, n_hidden: int, hide: set[str], made_at: datetime,
+                       advisories: list[dict] = ()) -> str:
     """社員向けの一覧（design.md §7.2）。entries は (見出し, id, 結果。まだ照合していなければ None)、retired は (見出し, id)。
     1 つの表に見出しの列を置く（絞り込みと並べ替えは表 1 つが前提）"""
     entries = sorted(entries, key=lambda x: (x[0].lower(), x[1]))
@@ -551,11 +636,12 @@ def render_share_index(entries: list[tuple[str, str, dict | None]], retired: lis
             f'<tr data-grp="{_e(group)}" data-has="{int(bool(findings))}"><td class="nowrap">{_e(group)}</td><td>{name}</td>'
             f"<td>{_e(state)}</td>{cells}"
             f'<td class="num">{len((e or {}).get("notices") or []) or "<span class=muted>0</span>"}</td>'
-            f'<td class="mono nowrap">{_e(_newest_published(findings)) or "<span class=muted>-</span>"}</td></tr>'
+            f'<td class="mono nowrap">{_e(_newest_published(findings)) or "<span class=muted>-</span>"}</td>'
+            f'<td>{_runtime_brief((e or {}).get("runtimes"))}</td></tr>'
         )
     head = ("<tr>" + _th("場所", "text") + _th("リポジトリ", "text") + _th("状態", "text") + "".join(
         _th(f'<span class="sev {s}">{SEVERITY_LABEL[s]}</span>', "num", "num") for s in fold.SEVERITIES)
-        + _th("注意", "num", "num") + _th("最新の発行日", "text") + "</tr>")
+        + _th("注意", "num", "num") + _th("最新の発行日", "text") + _th("言語", "text") + "</tr>")
     groups = sorted({g for g, _, _ in entries}, key=str.lower)
     body = [
         "<h1>脆弱性の一覧（社内）</h1>",
@@ -564,7 +650,9 @@ def render_share_index(entries: list[tuple[str, str, dict | None]], retired: lis
         '<div class="notice">社内のリポジトリの依存の一覧を含みます。社外に出さないでください。</div>',
         SHARE_GUIDE,
         "<h2>全体</h2>",
-        _tiles(total, [("前回から新規", n_new)]),
+        _tiles(total, [("前回から新規", n_new),
+                       ("言語に注意", sum(1 for _, _, e in entries if any(runtimes.needs_attention(r) for r in (e or {}).get("runtimes") or [])))]),
+        _advisories_section(advisories, entries),
         "<h2>リポジトリ</h2>",
         _filters([("grp", [(g, g) for g in groups])], [("has", "見つかったものがあるリポジトリだけ")], "（場所の順。見出しを押すと並べ替え）"),
         _table(head, rows),

@@ -43,6 +43,8 @@ CONFIG_FIELDS = [
     ("db_max_age_days", "手元の DB を取り直す日数", "int", "これより古ければ、照合の前に取り直す"),
     ("cache_max_age_hours", "キャッシュの有効時間 (時間)", "int", "lock ファイルが同じなら、この時間内は前回の結果を使う"),
     ("keep_results", "残す過去の結果の数", "int", "results/ に残す数"),
+    ("runtime_check", "言語 (PHP・Node.js) の版も調べる", "bool",
+     "サポート終了と、新しいセキュリティリリースを見る。endoflife.date・php.net・nodejs.org から言語の情報だけを取る (リポジトリの情報は送らない)"),
     ("exclude_dirs", "対象から外すフォルダ名", "list",
      "この名前のフォルダの中の lock ファイルは調べない (ほかの人のコードを取り込んだフォルダ)。, で区切る。* ? を書ける。空にすると何も外さない"),
 ]

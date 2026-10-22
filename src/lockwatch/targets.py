@@ -5,11 +5,12 @@ private（public 以外）を api.osv.dev に送らない約束は、ここの 2
   assert_all_public … オンラインで osv-scanner を呼ぶ直前に必ず通す。public 以外が混ざっていたら例外
 """
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 FORMAT = 1
 VISIBILITIES = ("public", "private", "unknown")
+RUNTIME_LANGS = ("php", "node")   # runtimes.LANGS と同じ（循環を避けて書き写す）
 
 
 class TargetsError(ValueError):
@@ -28,6 +29,7 @@ class Target:
     fetched: bool         # RepoTether が取ってきたもの（クローンしていない）
     share: str | None = None   # 社員向けの一覧（design.md §7.2）での見出し。None なら載せない
     retired: bool = False      # 更新しないと決めたもの。照合しない
+    runtimes: dict = field(default_factory=dict, hash=False, compare=False)  # 確定した言語の版（design.md §3.6）。{"php": "8.2.20"}
 
     @property
     def is_public(self) -> bool:
@@ -79,7 +81,12 @@ def parse(obj, data: Path) -> list[Target]:
         retired = r.get("retired", False)
         if not isinstance(retired, bool):
             raise TargetsError(f"{where}.retired が true / false ではありません: {retired!r}")
-        out.append(Target(rid, vis, root, is_fetched, share.strip() if share else None, retired))
+        runtimes = r.get("runtimes") or {}
+        if not isinstance(runtimes, dict) or any(k not in RUNTIME_LANGS or not isinstance(v, str) or not v.strip()
+                                                 for k, v in runtimes.items()):
+            raise TargetsError(f"{where}.runtimes は {{{'/'.join(RUNTIME_LANGS)}: 版の文字}} の形にしてください: {runtimes!r}")
+        out.append(Target(rid, vis, root, is_fetched, share.strip() if share else None, retired,
+                          {k: v.strip() for k, v in runtimes.items()}))
     return out
 
 
