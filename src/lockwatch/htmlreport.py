@@ -403,6 +403,15 @@ PIN_NOTE = (
 )
 
 
+def _day(raw) -> str:
+    """OSV の日時の日付の部分（UTC のまま。並べ替えは文字のままでよい形）"""
+    return raw[:10] if isinstance(raw, str) and len(raw) >= 10 else ""
+
+
+def _title(raw, label: str) -> str:
+    return f' title="{label} {_e(_day(raw))}"' if _day(raw) else ""
+
+
 def _findings_table(findings: list[dict], new_ids: set[tuple[str, str]]) -> str:
     rows = []
     for f in findings:
@@ -428,13 +437,14 @@ def _findings_table(findings: list[dict], new_ids: set[tuple[str, str]]) -> str:
             f'<td class="num">{_e(f"{score:.1f}") if isinstance(score, (int, float)) else "-"}</td>'
             f'<td class="nowrap"><span class="mono">{_e(f.get("package"))}</span><br><span class="muted mono">{_e(f.get("version"))}</span></td>'
             f'<td class="mono">{_e(fixed) if fixed else "<span class=muted>なし</span>"}</td>'
+            f'<td class="mono nowrap"{_title(f.get("modified"), "更新")}>{_e(_day(f.get("published"))) or "<span class=muted>-</span>"}</td>'
             f'<td class="nowrap"><a class="mono" href="https://osv.dev/vulnerability/{quote(vid, safe="")}">{_e(vid)}</a>'
             + (f'<br><span class="muted mono">{_e(aliases)}</span>' if aliases else "") + "</td>"
             f'<td>{" ".join(tags)} {_e(f.get("summary"))}</td>'
             f'<td class="mono path">{_e(f.get("lockfile"))}</td>'
             "</tr>"
         )
-    head = ("<tr>" + _th("深刻度", "rank") + _th("点数", "num", "num") + _th("パッケージ / 版", "text") + _th("直る版", "text")
+    head = ("<tr>" + _th("深刻度", "rank") + _th("点数", "num", "num") + _th("パッケージ / 版", "text") + _th("直る版", "text") + _th("発行日", "text")
             + _th("ID", "text") + _th("概要", "text") + _th("lock ファイル", "text") + "</tr>")
     return _table(head, rows)
 

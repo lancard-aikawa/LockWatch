@@ -3,6 +3,7 @@
 OSV の記録から要るものだけを抜く。説明文（details）・参照（references）は入れない。
 """
 import os
+from datetime import datetime, timezone
 
 SEVERITIES = ("critical", "high", "medium", "low", "unknown")
 INFORMATIONAL = ("unmaintained", "unsound", "notice")   # RustSec の知らせの種類（report --hide に書ける値）
@@ -13,7 +14,7 @@ def hidden(f: dict, hide: set[str]) -> bool:
     return f.get("severity") in hide or f.get("informational") in hide
 
 # 畳み方の版。finding の作り方を変えたら上げる（キャッシュの鍵に入り、古い畳み方のキャッシュを使わなくなる）
-SHAPE = 6
+SHAPE = 7
 
 MALICIOUS_PREFIX = "MAL-"   # OpenSSF の malicious-packages の記録（悪意あるコード）
 
@@ -83,6 +84,22 @@ def _events(vulns: list[dict], name: str, key: str) -> list[str]:
                    for ev in r.get("events") or [] if key in ev)
 
 
+def _when(raw) -> datetime | None:
+    try:
+        t = datetime.fromisoformat(raw.replace("Z", "+00:00")) if isinstance(raw, str) and raw else None
+    except ValueError:
+        return None
+    return t if t is None or t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def _dates(vulns: list[dict]) -> tuple[str | None, str | None]:
+    """束の記録の発行日（一番早いもの）と更新日（一番遅いもの）。OSV の published / modified の文字をそのまま返す"""
+    def pick(key, choose):
+        found = [(t, v[key]) for v in vulns for t in [_when(v.get(key))] if t is not None]
+        return choose(found, key=lambda x: x[0])[1] if found else None
+    return pick("published", min), pick("modified", max)
+
+
 def fixed_text(f: dict) -> str:
     """表示する直る版。fixed が無く last_affected だけなら「その版より後」"""
     if f.get("fixed"):
@@ -121,6 +138,7 @@ def by_source(data: dict) -> dict[str, list[dict]]:
                 sev = _label(mine) or severity(score)  # 区分を優先し、無ければ点数から
                 if malicious and sev == "unknown":
                     sev = "critical"  # MAL- には区分も点数も無い。unknown のまま一番下に沈めない
+                published, modified = _dates(mine)
                 found.append({
                     "lockfile": "",
                     "ecosystem": info.get("ecosystem", ""),
@@ -135,6 +153,8 @@ def by_source(data: dict) -> dict[str, list[dict]]:
                     "informational": _informational(mine, name),
                     "malicious": malicious,
                     "summary": next((v["summary"] for v in mine if v.get("summary")), ""),
+                    "published": published,
+                    "modified": modified,
                 })
     return out
 

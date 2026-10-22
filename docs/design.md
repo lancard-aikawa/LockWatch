@@ -125,7 +125,9 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
           "last_affected": [],
           "informational": null,
           "malicious": false,
-          "summary": "..."
+          "summary": "...",
+          "published": "2026-09-20T12:00:00Z",
+          "modified": "2026-09-28T03:10:00Z"
         }
       ]
     }
@@ -150,6 +152,8 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
   `GIT` の範囲は入れない。OSV の記録には `fixed` が無く `last_affected` だけのものがあり（2026-10-19、`http-cache-semantics` の
   GHSA-ch52-4w7c-c8xp は「4.2.0 まで」とだけあり、4.3.0 は出ていた）、`fixed` だけを見ると「直る版なし」と誤って出る。
   表示では `fixed` が無ければ「4.2.0 より後」と出し、直る版があるものとして数える。0.3.0 までの `latest.json` には無い。無ければ空として扱う
+- `published` / `modified`: OSV の記録の発行日と更新日（文字のまま）。束の中では発行日は一番早いもの、更新日は一番遅いもの。
+  記録に無ければ `null`。診断書には発行日の日付を出す（どれだけ前から知られているかの目安）。0.3.0 までの `latest.json` には無い。無ければ `null` として扱う
 - `score` は osv-scanner が CVSS から計算した `groups.max_severity`（空なら `null`）
 - `severity` は、記録に付いた区分（`database_specific.severity`、GitHub の勧告の `CRITICAL` / `HIGH` / `MODERATE` / `LOW`）を優先する。
   `MODERATE` は `medium`。束の中に複数あれば一番重いもの

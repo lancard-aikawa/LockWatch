@@ -35,7 +35,8 @@ class BySourceTest(unittest.TestCase):
     def test_finding_shape(self):
         f = self.one("pub/pnpm-lock.yaml")
         self.assertEqual(set(f), {"lockfile", "ecosystem", "package", "version", "id", "aliases",
-                                  "severity", "score", "fixed", "last_affected", "informational", "malicious", "summary"})
+                                  "severity", "score", "fixed", "last_affected", "informational", "malicious", "summary",
+                                  "published", "modified"})
         self.assertIsNone(f["informational"])
         self.assertIs(f["malicious"], False)
         self.assertEqual((f["package"], f["version"], f["ecosystem"]), ("vite", "6.0.1", "npm"))
@@ -54,6 +55,14 @@ class BySourceTest(unittest.TestCase):
         self.assertEqual(f["summary"], "requests sends credentials on redirect")  # 2 つ目の記録にだけある
         # 点数が無くても、束の中の GHSA の区分で決まる
         self.assertEqual((f["severity"], f["score"]), ("low", None))
+        # 発行日は束の中で一番早いもの、更新日は一番遅いもの (書き方の違う日時も比べられる)
+        self.assertEqual((f["published"], f["modified"]), ("2018-10-29T18:29:00Z", "2024-03-05T12:00:00Z"))
+
+    def test_dates_are_kept_as_written(self):
+        f = self.one("pub/pnpm-lock.yaml")
+        self.assertEqual((f["published"], f["modified"]), ("2026-01-15T08:00:00Z", "2026-02-01T00:00:00.123456789Z"))
+        f = self.one("unk/sub/requirements-dev.txt")  # 日付の無い記録
+        self.assertEqual((f["published"], f["modified"]), (None, None))
 
     def test_score_is_used_when_there_is_no_label(self):
         f = self.one("unk/sub/requirements-dev.txt")  # PYSEC だけ（区分なし）

@@ -11,6 +11,8 @@
               "id": "GHSA-aaaa-aaaa-aaaa",
               "aliases": ["CVE-2026-0001"],
               "summary": "vite serves files outside the root",
+              "published": "2026-01-15T08:00:00Z",
+              "modified": "2026-02-01T00:00:00.123456789Z",
               "details": "long text that must not be copied",
               "database_specific": {"severity": "MODERATE", "github_reviewed": true},
               "references": [{"type": "WEB", "url": "https://example.invalid/"}],
@@ -33,10 +35,11 @@
           "package": {"name": "requests", "version": "2.19.0", "ecosystem": "PyPI"},
           "groups": [{"ids": ["PYSEC-2018-28", "GHSA-bbbb-bbbb-bbbb"], "aliases": ["CVE-2018-18074", "GHSA-bbbb-bbbb-bbbb", "PYSEC-2018-28"], "max_severity": ""}],
           "vulnerabilities": [
-            {"id": "PYSEC-2018-28", "affected": [{"package": {"ecosystem": "PyPI", "name": "requests"},
+            {"id": "PYSEC-2018-28", "published": "2018-10-29T18:29:00Z", "modified": "2021-06-10T06:51:00Z", "affected": [{"package": {"ecosystem": "PyPI", "name": "requests"},
               "ranges": [{"type": "GIT", "repo": "https://github.com/psf/requests", "events": [{"introduced": "0"}, {"fixed": "c45d7c49ea75133e52ab22a8e9e13173938e36ff"}]},
                          {"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.20.0"}]}]}]},
             {"id": "GHSA-bbbb-bbbb-bbbb", "summary": "requests sends credentials on redirect",
+             "published": "2018-10-30T19:45:00+00:00", "modified": "2024-03-05T12:00:00Z",
              "database_specific": {"severity": "LOW"},
              "affected": [{"package": {"ecosystem": "PyPI", "name": "requests"},
               "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.20.0"}]}]}]}
