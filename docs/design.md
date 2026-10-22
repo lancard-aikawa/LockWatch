@@ -40,7 +40,9 @@
       "id": "github.com/example/web-app",
       "visibility": "public",
       "local_path": "C:/Repos/web-app",
-      "fetched_path": null
+      "fetched_path": null,
+      "share": "github.com/example",
+      "retired": false
     },
     {
       "id": "github.com/example/private-app",
@@ -64,6 +66,9 @@
 - `local_path` と `fetched_path` のどちらか一方を持つ。両方あれば `local_path` を使う（手元のものが新しいことが多い）
 - `fetched_path` はデータフォルダからの相対パスか絶対パス。中身は元のリポジトリと同じパスで lock ファイルだけを置く
   （osv-scanner はファイル名で形式を決めるので、名前もパスも変えない）
+- `share`: 社員向けの一覧（§7.2）に載せるときの見出し（`gogs.example.com`、`github.com/example` など）。`null` か無ければ載せない。空の文字は誤り
+- `retired`: `true` なら照合しない（更新しないと決めたもの）。全部を照合したときは結果からも外れ、`scan --id` で選ぶと誤りにする。
+  `share` もあれば、社員向けの一覧の「廃止」の欄に名前だけ出す。無ければ `false`
 - 知らないキーは無視する（RepoTether が先に新しい項目を書いても壊れない）
 
 RepoTether 側の決め方（RepoTether の `core/lockwatch.rs`）:
@@ -75,6 +80,10 @@ RepoTether 側の決め方（RepoTether の `core/lockwatch.rs`）:
   主なリモートが一覧にあって public なら `public`。それ以外（リモートが無い、一覧に無い、一覧をまだ取っていない）は `unknown`
   - **`public` になりうるのは github.com のリポジトリだけ。**Gogs・Gitea・GitHub Enterprise など自前のサーバーは、そこで「公開」でも
     社内などの中での公開なので `private` とみなす（2026-10-02、社内 Gogs の「公開」リポジトリ 13 件が `public` と判定されていたのを照合の前に見つけた）
+- `share`: RepoTether の設定「社員向けに載せる場所」（`gogs.example.com` や `github.com/example` のような、ホストかホスト/所有者）のうち、
+  主なリモートの `<ホスト>/<owner>/<name>` が当てはまるもの。当てはまった設定の文字をそのまま見出しにする。リモートが無いものと、どれにも当てはまらないもの
+  （個人のアカウント、外から取ってきたサンプル）は `null`
+- `retired`: RepoTether でそのプロジェクトに「廃止」の印を付けたもの
 - 書くのは中身（`repos`）が変わったときだけ。一時ファイルに書いてから入れ替える
 
 ### 3.2 取り込み場所（`<data>/incoming/`）
@@ -328,6 +337,7 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
 |---|---|
 | `lockwatch scan` | `targets.json` の全部を照合し、`results/` を書く |
 | `lockwatch scan --repo <フォルダ>` | そのリポジトリだけ（`unknown` 扱い）。`results/` は書かず、結果を表示する |
+| `lockwatch report --share` | 社員向けの一覧（§7.2）を `<data>/share` に書く |
 | `lockwatch scan --id <id>` | `targets.json` のうちその 1 つ。`latest.json` のそのリポジトリだけ差し替える（`new` もそのリポジトリの分だけ入れ替える。過去の結果は書かない） |
 | `lockwatch scan --id <id> --check` | 事前チェック。照合はせず、今照合したら前回の結果（キャッシュ）がそのまま返るかを JSON で答える（`--repo` とも使える。読むだけなので排他は取らない） |
 | `lockwatch scan --no-cache` | キャッシュを読まずに照合し直す（書くのはいつもどおり）。`--id` / `--repo` とも使える |
@@ -421,6 +431,24 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
   （`format`・`generator`・`repo`・`visibility`・`mode`・`scanned_at`・`actions`・`findings`・`notices`。`findings` と `notices` は `--hide` を当てた後のもの）。
   HTML の中に置くので、`<` は `<` にして書く。実行されるスクリプトではない（外にも通信しない）
 - 印刷（ブラウザの「PDF に保存」）でそのまま渡せる形にする（深刻度の色を印刷でも残す、表の行を途中で切らない）
+
+### 7.2 社員向けの一覧（`report --share`）
+
+社内の人に見せるための一覧（Cloudflare Access などで社員だけに見せる場所に置く前提）。`latest.json` と `targets.json` から作り、照合し直さない。
+
+- 載せるのは `targets.json` で `share` の付いたものだけ。手元だけのリポジトリ・個人のもの・外のサンプルは載せない（§3.1 の RepoTether 側の決め方）
+- 書く場所: `--out <フォルダ>`、無ければ `<data>/share`（§7.1 の診断書とは別の場所。混ぜない）。一覧の `index.html` と、載せるリポジトリの診断書（§7.1 と同じもの・同じ名前）
+  - 前に LockWatch が書いたページのうち、今回書かなかったものを消す（載せなくなったものを残さない）。それ以外のファイルには触れない
+- `--hide` はそのまま効く。`--html` / `--json` / `--new` / `--id` とは一緒に使えない（引数の誤り）
+- 一覧の中身:
+  1. 見出し: 照合した時刻（太字。古ければ照合が止まっていると分かるように）、osv-scanner の版、手元の DB の取得時刻
+  2. 「社内のリポジトリの依存の一覧を含みます。社外に出さないでください」
+  3. このページについて: 何の一覧か、RepoTether と LockWatch で作っていること（リンク）、載せているもの・載せていないもの、廃止の意味、読み方（直る版・発行日・対応の節）、鮮度
+  4. 全体: 深刻度ごとの件数、前回から新規の件数（載せるものの分だけ）
+  5. リポジトリの表（1 つの表。§7.1 の絞り込みと並べ替えは表 1 つが前提）: 場所（`share`）・リポジトリ（診断書へのリンク）・状態・深刻度ごとの件数・注意の件数・最新の発行日。
+     場所ごとに「隠す」、「見つかったものがあるリポジトリだけ」。`share` があってまだ照合していないものは「まだ照合していません」（リンクなし）
+  6. 廃止（`retired`）: 畳んだ欄に、場所と id だけ
+- 各リポジトリのページは §7.1 の診断書と同じ（手元のパスは出さない。lock ファイルはリポジトリの中の相対パス）
 
 ## 8. 設定（`<app>/lockwatch.json`）
 

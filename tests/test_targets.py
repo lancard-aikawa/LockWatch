@@ -48,6 +48,14 @@ class ParseTest(unittest.TestCase):
                 T.parse(obj, self.data)
             self.assertIn(needle, str(cm.exception))
 
+    def test_share_and_retired(self):
+        ts = T.parse(doc(repo("a", local_path="C:/a", share=" gogs.example.com ", retired=True), repo("b")), self.data)
+        self.assertEqual((ts[0].share, ts[0].retired), ("gogs.example.com", True))
+        self.assertEqual((ts[1].share, ts[1].retired), (None, False))  # 無ければ載せない・照合する
+        for bad in ({"share": ""}, {"share": 3}, {"retired": "yes"}):
+            with self.subTest(bad), self.assertRaises(T.TargetsError):
+                T.parse(doc(repo("x", local_path="C:/x", **bad)), self.data)
+
     def test_unknown_keys_are_ignored(self):
         obj = doc(repo("x", local_path="C:/x", future_field=1))
         obj["generator"] = "RepoTether 9"

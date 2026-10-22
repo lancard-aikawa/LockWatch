@@ -508,6 +508,75 @@ def render_index(repos: dict[str, dict], latest: dict, names: dict[str, str], *,
     return _page("脆弱性診断書 一覧", "\n".join(body))
 
 
+LOCKWATCH_URL = "https://github.com/lancard-aikawa/LockWatch"
+REPOTETHER_URL = "https://github.com/lancard-aikawa/RepoTether"
+
+# 社員向けの一覧の頭に置く案内（design.md §7.2）
+SHARE_GUIDE = f"""
+<h2>このページについて</h2>
+<p>社内のリポジトリが使っているパッケージ（lock ファイルに書かれた版）に、公表済みの脆弱性があるかを一覧にしたものです。</p>
+<ul>
+<li><strong>作り方</strong>: <a href="{REPOTETHER_URL}">RepoTether</a>（リポジトリと Claude Code の作業の追跡ツール）が手元のリポジトリの一覧を
+<a href="{LOCKWATCH_URL}">LockWatch</a> に渡し、LockWatch が osv-scanner で照合しています。非公開のリポジトリは、パッケージ名を外に送らず手元の脆弱性 DB で照合しています。</li>
+<li><strong>載せているもの</strong>: 会社のサーバーと、会社の GitHub の組織にあるリポジトリだけです。個人のリポジトリと、外から取ってきたサンプルは載せていません。</li>
+<li><strong>廃止</strong>: 更新しないと決めたリポジトリです。照合していません。使い続けているなら知らせてください。</li>
+<li><strong>読み方</strong>: リポジトリの名前を押すと、そのリポジトリのページを開きます。「直る版」はその版以上に上げれば直るもの、
+「発行日」は脆弱性が公表された日（古いほど長く知られている）です。ページの「対応」に、直す順番と上げる先の版の目安があります。</li>
+<li><strong>鮮度</strong>: 下の「照合」の時刻より後に公表された脆弱性は入っていません。何日も前のままなら、照合が止まっています。</li>
+</ul>
+"""
+
+
+def _newest_published(findings: list[dict]) -> str:
+    return max((d for f in findings for d in [_day(f.get("published"))] if d), default="")
+
+
+def render_share_index(entries: list[tuple[str, str, dict | None]], retired: list[tuple[str, str]], latest: dict,
+                       names: dict[str, str], *, n_new: int, n_hidden: int, hide: set[str], made_at: datetime) -> str:
+    """社員向けの一覧（design.md §7.2）。entries は (見出し, id, 結果。まだ照合していなければ None)、retired は (見出し, id)。
+    1 つの表に見出しの列を置く（絞り込みと並べ替えは表 1 つが前提）"""
+    entries = sorted(entries, key=lambda x: (x[0].lower(), x[1]))
+    total = _counts([f for _, _, e in entries for f in (e or {}).get("findings") or []])
+    rows = []
+    for group, rid, e in entries:
+        findings = (e or {}).get("findings") or []
+        n = _counts(findings)
+        cells = "".join(f'<td class="num">{n[s] or "<span class=muted>0</span>"}</td>' for s in fold.SEVERITIES)
+        if e is None:
+            name, state = f'<span class="mono path">{_e(rid)}</span>', "まだ照合していません"
+        else:
+            name = f'<a class="mono path" href="{_e(quote(names[rid]))}.html">{_e(rid)}</a>'
+            state = STATUS_LABEL.get(e.get("status", "error"), e.get("status"))
+        rows.append(
+            f'<tr data-grp="{_e(group)}" data-has="{int(bool(findings))}"><td class="nowrap">{_e(group)}</td><td>{name}</td>'
+            f"<td>{_e(state)}</td>{cells}"
+            f'<td class="num">{len((e or {}).get("notices") or []) or "<span class=muted>0</span>"}</td>'
+            f'<td class="mono nowrap">{_e(_newest_published(findings)) or "<span class=muted>-</span>"}</td></tr>'
+        )
+    head = ("<tr>" + _th("場所", "text") + _th("リポジトリ", "text") + _th("状態", "text") + "".join(
+        _th(f'<span class="sev {s}">{SEVERITY_LABEL[s]}</span>', "num", "num") for s in fold.SEVERITIES)
+        + _th("注意", "num", "num") + _th("最新の発行日", "text") + "</tr>")
+    groups = sorted({g for g, _, _ in entries}, key=str.lower)
+    body = [
+        "<h1>脆弱性の一覧（社内）</h1>",
+        f'<p class="sub">{len(entries)} リポジトリ。照合 <strong>{_e(_time(latest.get("scanned_at")))}</strong>'
+        f'（osv-scanner {_e(latest.get("osv_scanner") or "-")}、手元の DB {_e(_time(latest.get("db_downloaded_at")))}）</p>',
+        '<div class="notice">社内のリポジトリの依存の一覧を含みます。社外に出さないでください。</div>',
+        SHARE_GUIDE,
+        "<h2>全体</h2>",
+        _tiles(total, [("前回から新規", n_new)]),
+        "<h2>リポジトリ</h2>",
+        _filters([("grp", [(g, g) for g in groups])], [("has", "見つかったものがあるリポジトリだけ")], "（場所の順。見出しを押すと並べ替え）"),
+        _table(head, rows),
+    ]
+    if retired:
+        items = "".join(f'<li><span class="muted">{_e(g)}</span> <span class="mono">{_e(rid)}</span></li>'
+                        for g, rid in sorted(retired, key=lambda x: (x[0].lower(), x[1])))
+        body.append(f"<h2>廃止（照合していません）</h2>\n<details><summary>{len(retired)} リポジトリ</summary><ul>{items}</ul></details>")
+    body.append(_footer(made_at, n_hidden, hide))
+    return _page("脆弱性の一覧（社内）", "\n".join(body))
+
+
 def write_text(path: Path, text: str) -> None:
     """一時ファイルに書いてから入れ替える"""
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -97,6 +97,54 @@ class CliTest(unittest.TestCase):
                 self.assertEqual(p.returncode, 0, p.stderr.decode("utf-8", "replace"))
                 self.assertIn(want, p.stdout.decode("utf-8"))
 
+    def test_report_share(self):
+        data = self.dir / "data"
+
+        def entry(*findings):
+            return {"status": "ok", "visibility": "private", "mode": "offline", "scanned_at": "2026-10-22T09:00:00+09:00",
+                    "lockfiles": ["uv.lock"], "findings": list(findings), "notices": []}
+
+        def finding(pkg, vid, sev, published):
+            return {"lockfile": "uv.lock", "ecosystem": "PyPI", "package": pkg, "version": "1", "id": vid, "aliases": [],
+                    "severity": sev, "score": None, "fixed": ["2"], "informational": None, "malicious": False,
+                    "summary": "<b>x</b>", "published": published, "modified": None}
+
+        latest = {"format": 1, "scanned_at": "2026-10-22T09:00:00+09:00", "osv_scanner": "2.6.0", "db_downloaded_at": None,
+                  "repos": {"gogs.example.com/a/web": entry(finding("p", "PYSEC-1", "high", "2026-10-20T00:00:00Z"),
+                                                            finding("q", "PYSEC-2", "low", "2025-01-02T00:00:00Z")),
+                            "github.com/org/api": entry(),
+                            "github.com/me/private-tool": entry(finding("r", "PYSEC-3", "critical", None))},
+                  "new": [{"repo": "gogs.example.com/a/web", "package": "p", "id": "PYSEC-1", "severity": "high"}]}
+        (data / "results").mkdir(parents=True)
+        (data / "results" / "latest.json").write_text(json.dumps(latest), encoding="utf-8")
+        t = {"format": 1, "repos": [
+            {"id": "gogs.example.com/a/web", "visibility": "private", "local_path": "C:/w", "share": "gogs.example.com"},
+            {"id": "github.com/org/api", "visibility": "private", "local_path": "C:/a", "share": "github.com/org"},
+            {"id": "github.com/org/new", "visibility": "private", "local_path": "C:/n", "share": "github.com/org"},
+            {"id": "github.com/org/old", "visibility": "private", "local_path": "C:/o", "share": "github.com/org", "retired": True},
+            {"id": "github.com/me/private-tool", "visibility": "private", "local_path": "C:/p"}]}
+        (data / "targets.json").write_text(json.dumps(t), encoding="utf-8")
+        out = self.dir / "share"
+        out.mkdir()
+        (out / "github.com_me_private-tool.html").write_text('<meta name="generator" content="LockWatch 0.1">', encoding="utf-8")
+
+        code, stdout, err = run([*self.base, "report", "--share", "--out", str(out)])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(sorted(p.name for p in out.glob("*.html")),
+                         ["github.com_org_api.html", "gogs.example.com_a_web.html", "index.html"])  # 載せないものの古いページは消す
+        index = (out / "index.html").read_text(encoding="utf-8")
+        self.assertIn("このページについて", index)
+        self.assertNotIn("private-tool", index)  # share の無いものは載せない
+        self.assertIn('data-grp="github.com/org"', index)
+        self.assertIn("まだ照合していません", index)  # github.com/org/new
+        self.assertIn("2026-10-20", index)  # 最新の発行日
+        self.assertIn("廃止（照合していません）", index)
+        self.assertIn("github.com/org/old", index)
+        self.assertIn("前回から新規", index)
+        self.assertNotIn("<b>x</b>", (out / "gogs.example.com_a_web.html").read_text(encoding="utf-8"))  # 文字はエスケープ
+
+        self.assertEqual(run([*self.base, "report", "--share", "--html"])[0], 2)
+
     def test_app_dir_is_repo_root(self):
         self.assertTrue((app_dir() / "pyproject.toml").is_file())
 

@@ -26,6 +26,8 @@ class Target:
     visibility: str
     root: Path            # osv-scanner に渡すフォルダ（local_path か fetched_path）
     fetched: bool         # RepoTether が取ってきたもの（クローンしていない）
+    share: str | None = None   # 社員向けの一覧（design.md §7.2）での見出し。None なら載せない
+    retired: bool = False      # 更新しないと決めたもの。照合しない
 
     @property
     def is_public(self) -> bool:
@@ -71,7 +73,13 @@ def parse(obj, data: Path) -> list[Target]:
             root, is_fetched = _resolve(fetched, data), True
         else:
             raise TargetsError(f"{where}: local_path と fetched_path のどちらもありません")
-        out.append(Target(rid, vis, root, is_fetched))
+        share = r.get("share")
+        if share is not None and (not isinstance(share, str) or not share.strip()):
+            raise TargetsError(f"{where}.share が空でない文字でも null でもありません: {share!r}")
+        retired = r.get("retired", False)
+        if not isinstance(retired, bool):
+            raise TargetsError(f"{where}.retired が true / false ではありません: {retired!r}")
+        out.append(Target(rid, vis, root, is_fetched, share.strip() if share else None, retired))
     return out
 
 

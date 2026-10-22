@@ -45,7 +45,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="この深刻度か知らせの種類を消す（重ねて書ける）")
     r.add_argument("--id", help="このリポジトリだけ")
     r.add_argument("--html", action="store_true", help="リポジトリごとの診断書（HTML）と一覧（index.html）を書く")
-    r.add_argument("--out", help="診断書を書くフォルダ（既定: <data>/reports）")
+    r.add_argument("--out", help="診断書を書くフォルダ（既定: <data>/reports。--share なら <data>/share）")
+    r.add_argument("--share", action="store_true",
+                   help="社員向けの一覧（HTML）を書く。targets.json で share の付いたものだけを、見出しごとに載せる")
 
     k = sub.add_parser("packages", help="全依存の台帳を引く（どのリポジトリが、そのパッケージのどの版を使っているか）")
     k.add_argument("name", nargs="?", help="パッケージの名前（大文字小文字は区別しない。* ? を書ける）。省略するとリポジトリごとの件数")
@@ -225,6 +227,11 @@ def _cmd_scan(args, cfg: dict) -> int:
             if not targets:
                 print(f"targets.json にありません: {args.id}", file=sys.stderr)
                 return EXIT_USAGE
+        # 更新しないと決めたもの（retired）は照合しない。全部を照合したときは結果からも外れる
+        if args.id and targets[0].retired:
+            print(f"照合しない設定（廃止）です: {args.id}", file=sys.stderr)
+            return EXIT_USAGE
+        targets = [t for t in targets if not t.retired]
 
     if args.check:
         # 読むだけなので排他は取らない（定期実行の最中でも答えられる）
@@ -268,8 +275,11 @@ def _cmd_report(args, cfg: dict) -> int:
     if args.html and (args.json or args.new):
         print("--html は --json / --new と一緒に使えません", file=sys.stderr)
         return EXIT_USAGE
-    if args.out and not args.html:
-        print("--out は --html と一緒に使います", file=sys.stderr)
+    if args.share and (args.html or args.json or args.new or args.id):
+        print("--share は --html / --json / --new / --id と一緒に使えません", file=sys.stderr)
+        return EXIT_USAGE
+    if args.out and not (args.html or args.share):
+        print("--out は --html か --share と一緒に使います", file=sys.stderr)
         return EXIT_USAGE
     if args.id and args.id not in latest["repos"]:
         print(f"結果にありません: {args.id}", file=sys.stderr)
@@ -290,6 +300,8 @@ def _cmd_report(args, cfg: dict) -> int:
 
     if args.html:
         return _write_html(args, cfg, data, latest, repos, new, n_hidden, hide)
+    if args.share:
+        return _write_share(args, cfg, data, latest, repos, new, hide)
     new_notices = [n for n in latest.get("new_notices") or [] if not args.id or n.get("repo") == args.id]
     if args.json:
         obj = new if args.new else {**latest, "repos": repos, "new": new, "new_notices": new_notices}
@@ -337,6 +349,44 @@ def _write_html(args, cfg: dict, data: Path, latest: dict, repos: dict, new: lis
     print(f"{len(repos)} 件の診断書を書きました: {written[-1]}")
     if hide:
         print(f"（--hide {' '.join(sorted(hide))} で {n_hidden} 件を除いています）")
+    return EXIT_OK
+
+
+def _write_share(args, cfg: dict, data: Path, latest: dict, repos: dict, new: list[dict], hide: set[str]) -> int:
+    """社員向けの一覧を書く（design.md §7.2）。載せるのは targets.json で share の付いたものだけ"""
+    targets = _load_targets(args, cfg, data)
+    if targets is None:
+        return EXIT_USAGE
+    shared = [t for t in targets if t.share]
+    active = [t for t in shared if not t.retired]
+    out_dir = Path(args.out).expanduser() if args.out else data / "share"
+    made_at = store.now()
+    names = htmlreport.file_names(latest["repos"])
+    written = []
+    n_hidden = 0
+    for t in active:
+        e = repos.get(t.id)
+        if e is None:
+            continue  # まだ照合していない。一覧に「まだ照合していません」と出す
+        n_h = len(latest["repos"][t.id].get("findings") or []) - len(e["findings"])
+        n_hidden += n_h
+        new_ids = {(n.get("package"), n.get("id")) for n in new if n.get("repo") == t.id}
+        path = out_dir / f"{names[t.id]}.html"
+        htmlreport.write_text(path, htmlreport.render_repo(t.id, e, latest, new_ids=new_ids, n_hidden=n_h, hide=hide, made_at=made_at))
+        written.append(path)
+    ids = {t.id for t in active}
+    index = out_dir / "index.html"
+    htmlreport.write_text(index, htmlreport.render_share_index(
+        [(t.share, t.id, repos.get(t.id)) for t in active], [(t.share, t.id) for t in shared if t.retired], latest, names,
+        n_new=sum(1 for n in new if n.get("repo") in ids), n_hidden=n_hidden, hide=hide, made_at=made_at))
+    written.append(index)
+    # 載せなくなったリポジトリの古いページを消す。LockWatch が書いたもの以外には触れない
+    keep = {p.name.lower() for p in written}
+    for old in out_dir.glob("*.html"):
+        if old.name.lower() not in keep and htmlreport.is_ours(old):
+            old.unlink()
+            print(f"古いページを消しました: {old}")
+    print(f"社員向けの一覧を書きました: {index}（{len(written) - 1} リポジトリ、廃止 {len(shared) - len(active)}）")
     return EXIT_OK
 
 
