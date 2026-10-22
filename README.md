@@ -69,6 +69,7 @@ uv run lockwatch scan --id <id> --check       :: 照合はせず、前回の結�
 uv run lockwatch report --new                 :: 前回から新しく出たもの
 uv run lockwatch report --hide unmaintained   :: 保守されていないだけの知らせを消して表示（重ねて書ける）
 uv run lockwatch report --html                :: リポジトリごとの診断書（HTML）を data\reports\ に書く（一覧は index.html。ブラウザで絞り込み・並べ替えができる）
+uv run lockwatch report --share               :: 社員向けの一覧を data\share\ に書く（targets.json で share の付いたものだけ。RepoTether の「載せる場所」で決まる）
 uv run lockwatch packages lodash              :: 全依存の台帳を引く（どのリポジトリが lodash のどの版を使っているか。照合はしない）
 uv run lockwatch packages "@babel/*" --version 7.26.0   :: 名前に * ? を書ける。--version・--ecosystem・--id で絞れる。--json でも出せる
 uv run lockwatch db-update                    :: 脆弱性 DB を取り直す
