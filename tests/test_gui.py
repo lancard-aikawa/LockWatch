@@ -101,6 +101,28 @@ class RowsTest(unittest.TestCase):
         self.assertEqual({k for k, *_ in gui.CONFIG_FIELDS}, set(cfgmod.keys()))
 
 
+class FileRowsTest(unittest.TestCase):
+    def test_one_row_per_lockfile(self):
+        latest = {"repos": {
+            "app": {"status": "ok", "mode": "online", "lockfiles": ["uv.lock", "web/package-lock.json"], "excluded": ["vendor/x/uv.lock"],
+                  "findings": [finding("requests", "PYSEC-1", "high"), finding("urllib3", "PYSEC-2", "high")],
+                  "notices": [{"lockfile": "web/package-lock.json", "kind": "no-integrity"}]},
+            "empty": {"status": "no-lockfile", "mode": "offline", "lockfiles": [], "findings": []},
+            "broken": {"status": "error", "mode": "offline", "lockfiles": ["Cargo.lock"], "findings": [], "error": "x"},
+        }}
+        self.assertEqual(gui.file_rows(latest, ""), [
+            ("app", "ok", "online", "uv.lock", "checked", 2, 0),
+            ("app", "ok", "online", "web/package-lock.json", "checked", 0, 1),
+            ("app", "ok", "online", "vendor/x/uv.lock", "excluded", "", ""),
+            ("empty", "no-lockfile", "offline", "", "", "", ""),
+            ("broken", "error", "offline", "Cargo.lock", "checked", "", ""),   # 照合できていないので数えない
+        ])
+        self.assertEqual([r[3] for r in gui.file_rows(latest, "", hide_excluded=True)], ["uv.lock", "web/package-lock.json", "", "Cargo.lock"])
+        self.assertEqual([r[3] for r in gui.file_rows(latest, "PACKAGE")], ["web/package-lock.json"])
+        self.assertEqual([r[0] for r in gui.file_rows(latest, "EMPTY")], ["empty"])
+        self.assertEqual(gui.file_rows(None, ""), [])
+
+
 class AppTest(unittest.TestCase):
     """窓を作って（出さずに）読み込み・絞り込み・保存を通す"""
 
@@ -174,7 +196,8 @@ class AppTest(unittest.TestCase):
         self.root.withdraw()
 
     def test_notices_tab(self):
-        self.assertEqual([self.app.notebook.tab(i, "text") for i in self.app.notebook.tabs()], ["状態", "結果", "台帳", "注意", "設定"])
+        self.assertEqual([self.app.notebook.tab(i, "text") for i in self.app.notebook.tabs()],
+                         ["状態", "結果", "台帳", "注意", "調べたファイル", "設定"])
         self.assertIn("0 件を表示 (全体 0 件)", self.app.notice_count.cget("text"))
         notices = [{"lockfile": "requirements.txt", "kind": "unpinned", "package": "jinja2", "version": "", "detail": ""},
                    {"lockfile": "uv.lock", "kind": "recent", "package": "fresh", "version": "2.0.0", "detail": "2026-10-03T08:00:00Z"}]
@@ -187,6 +210,27 @@ class AppTest(unittest.TestCase):
         self.app.show_notices()
         self.assertEqual(len(tree.get_children()), 1)
         self.assertIn("1 件を表示 (全体 2 件)", self.app.notice_count.cget("text"))
+
+    def test_files_tab(self):
+        tree, count = self.app.files_tree, self.app.files_count
+        self.assertEqual([tree.item(i, "values")[3] for i in tree.get_children()], ["uv.lock", "Cargo.lock", ""])
+        self.assertIn("3 リポジトリ・調べた lock ファイル 2 個 (対象外 0 個)。lock ファイルの無いリポジトリ 1 件", count.cget("text"))
+        latest = {**LATEST, "repos": {**LATEST["repos"], "github.com/example/web-app": {
+            **LATEST["repos"]["github.com/example/web-app"], "excluded": ["vendor/x/requirements.txt"]}}}
+        (self.data / "results" / "latest.json").write_text(json.dumps(latest), encoding="utf-8")
+        self.app.reload()
+        self.assertEqual(tree.item(tree.get_children()[1], "values")[3:5], ("vendor/x/requirements.txt", "対象外"))
+        self.app.files_hide_excluded.set(True)
+        self.app.show_files()
+        self.assertEqual(len(tree.get_children()), 3)
+        self.app.files_search.set("cargo")
+        self.assertEqual([tree.item(i, "values")[0] for i in tree.get_children()], ["local:C:/Repos/tool"])
+        # 件数の行が窓の中に収まっている
+        self.app.notebook.select(4)
+        self.root.deiconify()
+        self.root.update()
+        self.assertLessEqual(count.winfo_rooty() + count.winfo_height(), self.root.winfo_rooty() + self.root.winfo_height())
+        self.root.withdraw()
 
     def test_report_argv_passes_hide(self):
         self.app.hide_vars["unmaintained"].set(True)

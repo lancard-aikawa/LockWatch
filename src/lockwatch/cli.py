@@ -158,7 +158,8 @@ def _print_notices(notices: list[dict]) -> None:
         print(f"  注意     {name}  {hygiene.describe(n)}  （{n.get('lockfile')}）")
 
 
-def _print_repo(rid: str, e: dict) -> None:
+def _print_repo(rid: str, e: dict, files: bool = False) -> None:
+    """リポジトリの 1 行。files なら、調べた lock ファイルと対象外のものを 1 行ずつ続ける（design.md §7 の report）"""
     if e["status"] == "ok":
         detail = f"{len(e['findings'])} 件" + (f"（{_counts(e['findings'])}）" if e["findings"] else "")
         if e.get("notices"):
@@ -167,9 +168,16 @@ def _print_repo(rid: str, e: dict) -> None:
         detail = e.get("error", "")
     else:
         detail = "lock ファイルなし"
-    if e.get("excluded"):
-        detail += f"（対象外の lock ファイル {len(e['excluded'])} 個）"
+    checked, excluded = e.get("lockfiles") or [], e.get("excluded") or []
+    counted = [f"lock ファイル {len(checked)} 個"] if checked else []
+    counted += [f"対象外 {len(excluded)} 個"] if excluded else []
+    if counted:
+        detail = "、".join([detail, *counted])
     print(f"{e['status']:<11} {e['mode']:<7} {rid}  {detail}")
+    for rel in checked if files else []:
+        print(f"  lock     {rel}")
+    for rel in excluded if files else []:
+        print(f"  対象外   {rel}")
 
 
 def _print_new(new: list[dict]) -> None:
@@ -264,7 +272,7 @@ def _cmd_scan(args, cfg: dict) -> int:
     for w in out.warnings:
         print(f"注意: {w}", file=sys.stderr)
     for rid, e in out.repos.items():
-        _print_repo(rid, e)
+        _print_repo(rid, e, files=bool(args.repo))
         if args.repo:
             _print_findings(e["findings"])
             _print_notices(e.get("notices") or [])
@@ -325,7 +333,7 @@ def _cmd_report(args, cfg: dict) -> int:
         _print_new(new)
     else:
         for rid, e in repos.items():
-            _print_repo(rid, e)
+            _print_repo(rid, e, files=bool(args.id))
             _print_findings(e["findings"])
             _print_notices(e.get("notices") or [])
         print(f"新しく出たもの: {len(new)} 件")

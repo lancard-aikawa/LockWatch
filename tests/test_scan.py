@@ -548,7 +548,7 @@ class ScanTest(unittest.TestCase):
         want = [{"lockfile": "sub/requirements-dev.txt", "kind": "unpinned", "package": "urllib3", "version": "", "detail": ">=1.24.1"}]
         self.assertEqual(r["unk"]["notices"], want)
         self.assertEqual((r["pub"]["notices"], r["empty"]["notices"], r["gone"]["notices"]), ([], [], []))
-        self.assertRegex(out, r"(?m)^ok +offline unk  1 件（critical 1）、注意 1 件$")
+        self.assertRegex(out, r"(?m)^ok +offline unk  1 件（critical 1）、注意 1 件、lock ファイル 1 個$")
         code, out, _ = self.run_cli("report")
         self.assertIn("  注意     urllib3  版を固定していません（>=1.24.1）。照合は不正確か、行われていません  （sub/requirements-dev.txt）", out)
         self.assertEqual(self.latest()["new"], [])  # 注意は new に入れない
@@ -618,8 +618,12 @@ class ScanTest(unittest.TestCase):
         self.assertEqual((r["empty"]["status"], r["empty"]["excluded"]), ("no-lockfile", ["vendor/pkg/uv.lock"]))
         offline = [c for c in self.fake.scans() if "--offline" in c]
         self.assertEqual(self.given(offline[0]), ["priv/uv.lock", "unk/sub/requirements-dev.txt"])  # osv-scanner にも渡さない
-        self.assertRegex(out, r"(?m)^ok +offline priv  .*（対象外の lock ファイル 2 個）$")
-        self.assertRegex(out, r"(?m)^no-lockfile online  empty  lock ファイルなし（対象外の lock ファイル 1 個）$")
+        self.assertRegex(out, r"(?m)^ok +offline priv  .*、lock ファイル 1 個、対象外 2 個$")
+        self.assertRegex(out, r"(?m)^no-lockfile online  empty  lock ファイルなし、対象外 1 個$")
+        self.assertNotIn("  lock     ", out)  # 全体のときはパスを並べない
+        # 1 つに絞ると、調べたものと外したもののパスを出す（design.md §7 の report）
+        _, out, _ = self.run_cli("report", "--id", "priv")
+        self.assertIn("  lock     uv.lock\n  対象外   app/Vendor/lib/docs/requirements.txt\n  対象外   assets/bower_components/x/package-lock.json\n", out)
 
     def test_exclude_dirs_setting_changes_what_is_scanned(self):
         self.mkrepo("priv", {"app/Vendor/lib/requirements.txt": "sphinx\n", "examples/demo/requirements.txt": "flask\n"})

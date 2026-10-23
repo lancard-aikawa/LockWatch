@@ -1,4 +1,4 @@
-"""lockwatch gui: 状態・結果・台帳・注意・設定の画面（docs/design.md §9）
+"""lockwatch gui: 状態・結果・台帳・注意・調べたファイル・設定の画面（docs/design.md §9）
 
 tkinter で作る（実行時の依存を足さない）。グローバルの CLAUDE.md にある tkinter の落とし穴の対策:
   - タブは選ばれたものがはっきり分かるスタイル（ensure_notebook_style）
@@ -30,6 +30,9 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 SEVERITY_LABEL = {"critical": "緊急", "high": "高", "medium": "中", "low": "低", "unknown": "不明"}
 INFORMATIONAL_LABEL = {"unmaintained": "保守終了", "unsound": "安全性の欠陥", "notice": "お知らせ"}
 MALICIOUS_LABEL = "悪意あるコード"
+STATUS_LABEL = {"ok": "照合済み", "no-lockfile": "lock ファイルなし", "error": "照合できず"}
+MODE_LABEL = {"online": "オンライン", "offline": "手元の DB"}
+FILE_KIND_LABEL = {"checked": "調べた", "excluded": "対象外"}
 PACKAGE_ROWS_MAX = 2000   # 台帳のタブに出す行の上限（件数は全部を数える）
 
 # 設定の項目: (キー, 表示名, 種類, 説明)。種類は dir / file / bool / int / list（, で区切った並び）
@@ -111,6 +114,27 @@ def notice_rows(latest: dict | None, hide: set[str], text: str, new_only: bool =
     return rows
 
 
+def file_rows(latest: dict | None, text: str, hide_excluded: bool = False) -> list[tuple]:
+    """調べたファイルのタブの行: (repo, status, mode, lockfile, kind, findings の数, 注意の数)。latest.json の並びのまま。
+    kind は checked / excluded。lock ファイルの無いリポジトリは lockfile と kind を空にして 1 行。
+    数は照合済みで調べたものだけ（ほかは ""）。text はリポジトリと lock ファイルの部分一致（大文字小文字を区別しない）"""
+    needle = text.strip().lower()
+    rows = []
+    for rid, entry in ((latest or {}).get("repos") or {}).items():
+        e = entry or {}
+        status, mode = e.get("status", ""), e.get("mode", "")
+        files = [(rel, "checked") for rel in e.get("lockfiles") or []]
+        files += [] if hide_excluded else [(rel, "excluded") for rel in e.get("excluded") or []]
+        for rel, kind in files or [("", "")]:
+            if needle and needle not in rid.lower() and needle not in rel.lower():
+                continue
+            counted = status == "ok" and kind == "checked"
+            n_findings = sum(1 for f in e.get("findings") or [] if f.get("lockfile") == rel) if counted else ""
+            n_notices = sum(1 for n in e.get("notices") or [] if n.get("lockfile") == rel) if counted else ""
+            rows.append((rid, status, mode, rel, kind, n_findings, n_notices))
+    return rows
+
+
 def package_rows(inventory: dict, name: str, version: str) -> tuple[list[tuple] | None, int]:
     """台帳のタブの行: ([(package, version, ecosystem, repo, lockfile), ...], リポジトリの数)。
     名前も版も空なら (None, 0)（全件は多すぎるので出さない）。名前は部分一致（* ? を書けば全体の一致）"""
@@ -180,6 +204,7 @@ class App:
         self._build_results(nb)
         self._build_packages(nb)
         self._build_notices(nb)
+        self._build_files(nb)
         self._build_settings(nb)
 
         self._after = self.root.after(100, self._poll)
@@ -513,6 +538,57 @@ class App:
             total = sum(len((e or {}).get("notices") or []) for e in self.latest.get("repos", {}).values())
             self.notice_count.config(text=f"{len(rows)} 件を表示 (全体 {total} 件)。脆弱性の照合とは別に、lock ファイルを読んで分かったこと")
 
+    # ---- 調べたファイルのタブ
+
+    def _build_files(self, nb: ttk.Notebook) -> None:
+        tab = ttk.Frame(nb, padding=10)
+        nb.add(tab, text="調べたファイル")
+
+        filters = ttk.Frame(tab)
+        filters.pack(side=tk.TOP, fill=tk.X)
+        self.files_hide_excluded = tk.BooleanVar(value=False)
+        ttk.Checkbutton(filters, text="対象外を隠す", variable=self.files_hide_excluded,
+                        command=self.show_files).pack(side=tk.LEFT)
+        self.files_search = tk.StringVar()
+        self.files_search.trace_add("write", lambda *_: self.show_files())
+        ttk.Entry(filters, textvariable=self.files_search, width=24).pack(side=tk.RIGHT)
+        ttk.Label(filters, text="絞り込み").pack(side=tk.RIGHT, padx=(0, 4))
+
+        # 件数の行を、表より先に下に置く
+        self.files_count = ttk.Label(tab, text="")
+        self.files_count.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+
+        table = ttk.Frame(tab)
+        table.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(8, 0))
+        cols = [("repo", "リポジトリ", 260), ("status", "状態", 100), ("mode", "照合", 80), ("lockfile", "lock ファイル", 260),
+                ("kind", "扱い", 70), ("findings", "件数", 50), ("notices", "注意", 50)]
+        self.files_tree = ttk.Treeview(table, columns=[c[0] for c in cols], show="headings")
+        for key, label, width in cols:
+            self.files_tree.heading(key, text=label)
+            self.files_tree.column(key, width=width, stretch=key in ("repo", "lockfile"),
+                                   anchor=tk.E if key in ("findings", "notices") else tk.W)
+        scroll = ttk.Scrollbar(table, orient=tk.VERTICAL, command=self.files_tree.yview)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.files_tree.configure(yscrollcommand=scroll.set)
+        self.files_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    def show_files(self) -> None:
+        rows = file_rows(self.latest, self.files_search.get(), self.files_hide_excluded.get())
+        self.files_tree.delete(*self.files_tree.get_children())
+        for rid, status, mode, rel, kind, n_findings, n_notices in rows:
+            self.files_tree.insert("", tk.END, values=(rid, STATUS_LABEL.get(status, status), MODE_LABEL.get(mode, mode), rel,
+                                                       FILE_KIND_LABEL.get(kind, kind), n_findings, n_notices))
+        if self.latest is None:
+            self.files_count.config(text="結果がまだありません")
+            return
+        repos = [e or {} for e in self.latest.get("repos", {}).values()]
+        checked = sum(len(e.get("lockfiles") or []) for e in repos)
+        excluded = sum(len(e.get("excluded") or []) for e in repos)
+        none = sum(1 for e in repos if not e.get("lockfiles"))
+        self.files_count.config(
+            text=f"{len(repos)} リポジトリ・調べた lock ファイル {checked} 個 (対象外 {excluded} 個)。"
+                 f"lock ファイルの無いリポジトリ {none} 件。件数と注意はその lock ファイルの分")
+
     # ---- 設定のタブ
 
     def _build_settings(self, nb: ttk.Notebook) -> None:
@@ -589,6 +665,7 @@ class App:
         self.latest = store.load_latest(self.data)
         self.show_results()
         self.show_notices()
+        self.show_files()
         self.inventory = store.load_packages(self.data)
         self.show_packages()
         cfg, data, targets = dict(self.cfg), self.data, self.targets
