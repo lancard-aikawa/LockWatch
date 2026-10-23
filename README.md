@@ -72,6 +72,7 @@ uv run lockwatch report --html                :: リポジトリごとの診断�
 uv run lockwatch report --share               :: 社員向けの一覧を data\share\ に書く（targets.json で share の付いたものだけ。RepoTether の「載せる場所」で決まる）
 uv run lockwatch packages lodash              :: 全依存の台帳を引く（どのリポジトリが lodash のどの版を使っているか。照合はしない）
 uv run lockwatch packages "@babel/*" --version 7.26.0   :: 名前に * ? を書ける。--version・--ecosystem・--id で絞れる。--json でも出せる
+uv run lockwatch assess --id github.com/example/web-app   :: その脆弱性がビルド・リリースにどう効くかを Claude Code に調べさせ、data\assess\ に HTML で書く（数分。照合はしない）
 uv run lockwatch db-update                    :: 脆弱性 DB を取り直す
 uv run lockwatch status                       :: 使える状態か（osv-scanner・受け渡し・最後の照合・定期実行）
 uv run lockwatch targets check targets.json   :: 受け渡しのファイルを検査し、オンライン・手元の振り分けを表示
@@ -93,6 +94,9 @@ uv run lockwatch config show
   手元の DB にも入っているので、非公開のリポジトリでも検出する
 - 照合のたびに、脆弱性の無いものも含めた全依存の台帳（`data\results\packages.json`）を書く。「この版が侵害された」という知らせが出たときに、
   `lockwatch packages <名前> --version <版>` で、使っているリポジトリをその場で引ける。非公開のリポジトリの依存の一覧を含むので、外に出さない
+- `assess` は、見つかったパッケージが**リリースに入るか、ビルドのときだけか、開発の手元だけか**を、Claude Code（`claude.exe`）にリポジトリの中を読ませて調べる。
+  急ぐのはリリースに入るものだけ。Claude には読むことだけさせ（Read・Grep・Glob。コマンドの実行・書き込み・Web は無し）、リポジトリには何も書かない。
+  **非公開のリポジトリの中身も Claude（Anthropic）に送る**ので、頼んだときだけ動く（定期実行では動かない）。RepoTether の「Claude に影響を調べさせる」からも呼ぶ（[docs/design.md](docs/design.md) §7.3）
 - 結果（`data\results\latest.json`）の形と、RepoTether との受け渡しの約束は [docs/design.md](docs/design.md) §3
 
 ## 定期実行

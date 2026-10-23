@@ -2,6 +2,24 @@
 
 <!-- 見出しは `## <版番号>` の形にする。まだ出していない変更は「## 未公開」に書き、リリースのときに版番号へ書き換える -->
 
+## 0.5.0
+
+上げるときに気を付けること:
+
+- `assess` には Claude Code のネイティブ版（`claude.exe`）が PATH に要る。npm で入れた `claude.cmd` では動かない
+- `assess` は非公開のリポジトリの中身も Claude（Anthropic）に送る。頼んだときだけ動き、定期実行・`scan`・画面からは動かない
+- RepoTether の「Claude に影響を調べさせる」は、この版から使える
+
+変更:
+
+- `lockwatch assess --id <id>`: そのリポジトリの脆弱性がビルド・リリースにどう効くかを Claude Code（`claude -p`）に調べさせ、
+  `<data>/assess/<名前>.html` に書く（design.md §7.3）。パッケージごとに「リリースに入る・ビルドのときだけ・開発の手元だけ・使っていない」と、
+  急ぐ度合い・理由・根拠のファイルと行・対応を出す。Claude には読むことだけさせる（Read・Grep・Glob。Bash・書き込み・Web・MCP なし）。
+  答えは決めた形の JSON で受け取り、HTML は LockWatch が作る。非公開のリポジトリの中身も Claude（Anthropic）に送るので、頼んだときだけ動く
+- `lockwatch assess --id <id> --last`: 調べずに、前回書いた HTML の場所と時刻を JSON で答える（RepoTether の「前回の結果を開く」用）。
+  `changed` で、そのとき渡した脆弱性と今の結果の中身が違うかも答える（照合の時刻が変わっただけなら違うとしない）
+- 終了コード 5 = Claude Code が無い・失敗した（`assess` だけ）
+
 ## 0.4.0
 
 上げるときに気を付けること:

@@ -4,11 +4,12 @@ import contextlib
 import json
 import sys
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
 from . import config as cfgmod
-from . import fold, htmlreport, hygiene, osv, runtimes, store
+from . import assess, fold, htmlreport, hygiene, osv, runtimes, store
 from . import packages as pkgmod
 from . import scan as scanmod
 from . import status as statusmod
@@ -19,6 +20,7 @@ EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_BUSY = 3
 EXIT_SCANNER = 4
+EXIT_CLAUDE = 5
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -57,6 +59,11 @@ def _build_parser() -> argparse.ArgumentParser:
     k.add_argument("--json", action="store_true", help="JSON で出す")
 
     sub.add_parser("db-update", help="脆弱性 DB を取り直す")
+
+    a = sub.add_parser("assess", help="脆弱性がビルド・リリースにどう効くかを Claude Code に調べさせ、HTML に書く（照合はしない）")
+    a.add_argument("--id", required=True, help="targets.json のうち、この id のリポジトリ")
+    a.add_argument("--model", help="Claude のモデル（既定は Claude Code の既定）")
+    a.add_argument("--last", action="store_true", help="調べずに、前回書いた HTML の場所と時刻を JSON で答える")
 
     sub.add_parser("gui", help="状態・結果・台帳・注意・設定の画面を開く（pythonw -m lockwatch gui なら黒い窓が出ない）")
 
@@ -544,10 +551,71 @@ def _dispatch(args, config_path: Path, cfg: dict) -> int:
         return _cmd_packages(args, cfg)
     if args.command == "status":
         return _cmd_status(args, cfg)
+    if args.command == "assess":
+        return _cmd_assess(args, cfg)
     if args.command == "gui":
         from .gui import run  # tkinter は画面を開くときだけ読む
         return run(config_path, args.data, args.targets)
     return _cmd_db_update(args, cfg)
+
+
+def _cmd_assess(args, cfg: dict) -> int:
+    """ビルド・リリースへの影響を Claude Code に調べさせる（design.md §7.3）。照合はしない"""
+    data = data_dir(args.data, cfg["data_dir"])
+    if args.last:
+        return _assess_last(args, data)
+    targets = _load_targets(args, cfg, data)
+    if targets is None:
+        return EXIT_USAGE
+    t = next((t for t in targets if t.id == args.id), None)
+    if t is None:
+        print(f"targets.json にありません: {args.id}", file=sys.stderr)
+        return EXIT_USAGE
+    if t.retired:
+        print(f"照合しない設定（廃止）です: {args.id}", file=sys.stderr)
+        return EXIT_USAGE
+    if t.fetched or not t.root.is_dir():
+        print(f"手元にクローンしたフォルダがありません（lock ファイルだけでは調べられません）: {args.id}", file=sys.stderr)
+        return EXIT_USAGE
+    latest = store.load_latest(data)
+    entry = (latest or {}).get("repos", {}).get(args.id)
+    if entry is None or entry.get("status") != "ok":
+        print(f"照合した結果がありません（先に scan --id）: {args.id}", file=sys.stderr)
+        return EXIT_USAGE
+    inp = assess.build_input(args.id, entry, t.root)
+    if not inp["packages"] and not inp["runtimes"]:
+        print(f"調べる脆弱性がありません（知らせは除きます）: {args.id}", file=sys.stderr)
+        return EXIT_USAGE
+    try:
+        exe = assess.find_claude()
+        print(f"Claude Code に調べさせています（{len(inp['packages'])} パッケージ・{len(inp['runtimes'])} 言語。数分かかります）…", flush=True)
+        result = assess.run_claude(exe, assess.build_prompt(inp), cwd=data / "assess", root=t.root, model=args.model)
+    except assess.AssessError as e:
+        print(e, file=sys.stderr)
+        return EXIT_CLAUDE
+    name = htmlreport.file_names(latest["repos"])[args.id]
+    path = data / "assess" / f"{name}.html"
+    htmlreport.write_text(path, assess.render(args.id, inp, result, model=args.model, made_at=store.now()))
+    print(f"書きました: {path}")
+    return EXIT_OK
+
+
+def _assess_last(args, data: Path) -> int:
+    """前回の assess の HTML（design.md §7.3）。無ければ exists: false。
+    changed は、そのとき渡した脆弱性と今の結果の中身が違うか（比べられなければ null）"""
+    latest = store.load_latest(data)
+    if latest is None or args.id not in latest["repos"]:
+        print(f"結果にありません: {args.id}", file=sys.stderr)
+        return EXIT_USAGE
+    path = data / "assess" / f"{htmlreport.file_names(latest['repos'])[args.id]}.html"
+    made = store.iso(datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)) if path.is_file() else None
+    changed = None
+    entry = latest["repos"][args.id]
+    prev = assess.read_input(path) if made else None
+    if prev is not None and entry.get("status") == "ok":
+        changed = assess.fingerprint(prev) != assess.fingerprint(assess.build_input(args.id, entry, Path(".")))
+    print(json.dumps({"path": str(path), "exists": made is not None, "made_at": made, "changed": changed}, ensure_ascii=False))
+    return EXIT_OK
 
 
 def _cmd_status(args, cfg: dict) -> int:
