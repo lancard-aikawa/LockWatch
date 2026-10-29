@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import fold, hygiene, lockfiles, osv, runtimes, store
+from . import exploits, fold, hygiene, lockfiles, osv, runtimes, store
 from .targets import Target, split_by_privacy
 
 
@@ -128,9 +128,11 @@ def check(target: Target, *, data: Path, cfg: dict, scanner_version: str, at: da
 
 
 def run(targets: list[Target], *, data: Path, cfg: dict, exe: str, scanner_version: str,
-        at: datetime, force_db_update: bool = False, use_cache: bool = True, runtime_data: dict | None = None) -> Outcome:
+        at: datetime, force_db_update: bool = False, use_cache: bool = True, runtime_data: dict | None = None,
+        exploit_data: exploits.Index | None = None) -> Outcome:
     """use_cache が False なら、キャッシュを読まずに照合し直す（書くのはいつもどおり）。
-    runtime_data は言語のデータ（runtimes.load_or_fetch）。None なら言語は版だけを出す"""
+    runtime_data は言語のデータ（runtimes.load_or_fetch）。None なら言語は版だけを出す。
+    exploit_data は悪用の情報（exploits.load_or_fetch）。None なら kev・epss は null"""
     jobs = _jobs(targets, cfg)
     entries: dict[str, dict] = {}
     packages: dict[str, list[list[str]]] = {}
@@ -234,6 +236,8 @@ def run(targets: list[Target], *, data: Path, cfg: dict, exe: str, scanner_versi
     # 言語そのものの版（design.md §3.6）。lock ファイルの無いリポジトリでも見る。キャッシュには入れない
     for job in jobs:
         entries[job.target.id]["runtimes"] = runtimes.check_target(job.root, job.target.runtimes, runtime_data, at)
+        # 悪用の情報（design.md §3.7）。一覧は毎日変わるので、キャッシュから来たものにも付け直す
+        entries[job.target.id]["findings"] = exploits.annotate(entries[job.target.id]["findings"], exploit_data)
 
     times = [t for t in (store.parse_time(db_state.get(e)) for e in db_used) if t is not None]
     return Outcome(repos={j.target.id: entries[j.target.id] for j in jobs},

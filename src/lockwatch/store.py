@@ -163,7 +163,30 @@ def new_findings(prev: dict | None, repos: dict[str, dict]) -> list[dict]:
             if k not in known and k not in seen:
                 seen.add(k)
                 out.append({"repo": rid, "package": f["package"], "id": f["id"], "severity": f["severity"],
-                            "informational": f.get("informational"), "malicious": bool(f.get("malicious"))})
+                            "informational": f.get("informational"), "malicious": bool(f.get("malicious")),
+                            "kev": bool(f.get("kev"))})
+    return out
+
+
+def new_kev(prev: dict | None, repos: dict[str, dict]) -> list[dict]:
+    """前回の latest.json で KEV の印が無く、今回付いた findings（design.md §3.7）。前回から新しく出たものは new に入るので入れない。
+    前回が無い・前回の結果に exploits が無い（悪用の情報を入れる前の版、切っていた、取れていなかった）なら空。
+    前回 ok でなかったリポジトリは比べない"""
+    if prev is None or not prev.get("exploits"):
+        return []
+    out = []
+    for rid, cur in repos.items():
+        old = prev["repos"].get(rid)
+        if not isinstance(old, dict) or old.get("status") != "ok" or cur.get("status") != "ok":
+            continue
+        before = {(f.get("package"), f.get("id")): bool(f.get("kev")) for f in old.get("findings") or []}
+        seen = set()
+        for f in cur["findings"]:
+            k = (f["package"], f["id"])
+            if f.get("kev") and before.get(k) is False and k not in seen:
+                seen.add(k)
+                out.append({"repo": rid, "package": f["package"], "id": f["id"], "severity": f["severity"],
+                            "cve": f["kev"].get("cve"), "added": f["kev"].get("added")})
     return out
 
 

@@ -81,6 +81,10 @@ def build_input(rid: str, entry: dict, root: Path) -> dict:
             "ids": [f.get("id", "") for f in items], "summaries": summaries,
             "upgrade_to": a.get("target"), "upgrade_above": a.get("above"),
             "malicious": any(f.get("malicious") for f in items),
+            # 悪用の情報（design.md §3.7）。KEV は実際の攻撃に使われたと確認された CVE、EPSS は 30 日以内に悪用される確率の一番高いもの
+            "kev": sorted({f["kev"]["cve"] for f in items if isinstance(f.get("kev"), dict) and f["kev"].get("cve")}),
+            "epss": max((f["epss"]["score"] for f in items if isinstance(f.get("epss"), dict) and isinstance(f["epss"].get("score"), (int, float))),
+                        default=None),
         })
     rts = [{"ref": f"r{i}", **{k: r.get(k) for k in ("name", "version", "source", "lower_bound", "cycle", "eol", "status", "security", "upgrade_to")}}
            for i, r in enumerate((r for r in entry.get("runtimes") or [] if runtime_attention(r)), 1)]
@@ -107,6 +111,9 @@ PROMPT = """あなたは、ソフトウェアの依存の脆弱性が、その�
 - reason: そう判断した理由（日本語で 1〜3 文。脆弱性が突かれる条件と、このリポジトリでの使われ方を結びつけて書く）
 - evidence: 根拠にしたファイルと行（「packages/functions/package.json:12」の形。リポジトリの中の相対パス）
 - action: 何をすればよいか（日本語で 1 文。upgrade_to / upgrade_above は上げる先の版の目安）
+
+packages の kev は、実際の攻撃に使われたと CISA が確認した CVE（Known Exploited Vulnerabilities）、epss は 30 日以内に悪用が観測される確率（0〜1、FIRST の EPSS）です。
+kev があるものは、リリースに入っていれば now にしてください。ビルド・開発だけでも、突かれる条件（開発サーバーを外に公開している など）を確かめて reason に書いてください。
 
 調べ方の手がかり: package.json の dependencies と devDependencies、ワークスペースの構成、ビルドの設定（vite.config・webpack・tsconfig など）、
 CI の設定（.github/workflows など）、Dockerfile、デプロイの設定（firebase.json・wrangler.toml・vercel.json など）、
@@ -230,6 +237,8 @@ def _subject(src: dict) -> str:
         name = {"php": "PHP", "node": "Node.js"}.get(src.get("name"), src.get("name"))
         return f'<span class="mono">{_e(name)} {_e(src.get("version"))}</span><br><span class="muted">言語（{_e(src.get("source"))}）</span>'
     mal = '<br><span class="tag mal">悪意あるコード</span>' if src.get("malicious") else ""
+    if src.get("kev"):
+        mal += '<br><span class="tag mal">悪用あり（KEV）</span>'
     return (f'<span class="mono">{_e(src["package"])}</span><br><span class="muted mono">{_e(src["version"])}</span>'
             f'<br><span class="muted mono path">{_e(src["lockfile"])}</span>{mal}')
 

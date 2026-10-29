@@ -10,7 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
-from lockwatch import fold, osv, store
+from lockwatch import exploits, fold, osv, store
 from lockwatch.cli import main
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -56,7 +56,7 @@ class ScanTest(unittest.TestCase):
         exe = self.dir / "osv-scanner.exe"
         exe.write_text("", encoding="utf-8")
         cfg = self.dir / "lockwatch.json"
-        cfg.write_text(json.dumps({"osv_scanner": str(exe), "runtime_check": False}), encoding="utf-8")
+        cfg.write_text(json.dumps({"osv_scanner": str(exe), "runtime_check": False, "exploit_check": False}), encoding="utf-8")
         self.base = ["--config", str(cfg), "--data", str(self.data)]
         self.mkrepo("pub", {"pnpm-lock.yaml": "a", "node_modules/x/package-lock.json": "ignored"})
         self.mkrepo("priv", {"uv.lock": "b"})
@@ -164,8 +164,36 @@ class ScanTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(self.latest()["new"],
                          [{"repo": "pub", "package": "vite", "id": "GHSA-cccc-cccc-cccc", "severity": "medium", "informational": None,
-                           "malicious": False}])
+                           "malicious": False, "kev": False}])
         self.assertIn("新しく出たもの: 1 件", out)
+
+    def test_exploit_marks_are_added_even_from_cache(self):
+        """悪用の情報（design.md §3.7）はキャッシュに入れず、照合のたびに付け直す。前回は無く今回 KEV に載ったものは new_kev"""
+        def idx(kev):
+            return exploits.Index(kev, {"CVE-2026-0001": (0.5, 0.99)}, {"fetched_at": "2026-10-23T09:00:00+09:00",
+                                                                       "kev_version": "2026.10.23", "epss_date": "2026-10-22"})
+        with mock.patch.object(exploits, "load_or_fetch", return_value=(idx({}), None)):
+            self.run_cli("scan")
+        first = [f for e in self.latest()["repos"].values() for f in e["findings"] if f["id"] == "GHSA-aaaa-aaaa-aaaa"]
+        self.assertTrue(first)
+        self.assertEqual({(f["kev"], f["epss"]["score"]) for f in first}, {(None, 0.5)})
+        self.assertEqual(self.latest()["exploits"]["kev_version"], "2026.10.23")
+        self.assertEqual(self.latest()["new_kev"], [])
+
+        n_scans = len(self.fake.scans())
+        kev = {"CVE-2026-0001": {"added": "2026-10-23", "ransomware": False}}
+        with mock.patch.object(exploits, "load_or_fetch", return_value=(idx(kev), None)):
+            code, out, _ = self.run_cli("scan")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(self.fake.scans()), n_scans)  # lock ファイルが同じなのでキャッシュから返った
+        latest = self.latest()
+        marked = [f for e in latest["repos"].values() for f in e["findings"] if f["id"] == "GHSA-aaaa-aaaa-aaaa"]
+        self.assertEqual({f["kev"]["cve"] for f in marked}, {"CVE-2026-0001"})
+        self.assertEqual({(n["id"], n["cve"]) for n in latest["new_kev"]}, {("GHSA-aaaa-aaaa-aaaa", "CVE-2026-0001")})
+        self.assertIn("新しく悪用が確認されたもの（CISA KEV）", out)
+        # キャッシュには印を入れない
+        for p in (self.data / "cache").glob("*.json"):
+            self.assertNotIn('"kev"', p.read_text(encoding="utf-8"))
 
     def test_informational_is_still_new(self):
         self.run_cli("scan")

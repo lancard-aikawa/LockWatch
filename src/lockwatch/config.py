@@ -14,6 +14,7 @@ DEFAULTS: dict = {
     "keep_results": 30,
     "exclude_dirs": ["vendor", "vendors", "third_party", "third-party", "bower_components", "node_modules"],
     "runtime_check": True,
+    "exploit_check": True,
 }
 
 
@@ -53,6 +54,7 @@ _PARSERS = {
     "keep_results": _parse_positive_int,
     "exclude_dirs": _parse_names,
     "runtime_check": _parse_bool,
+    "exploit_check": _parse_bool,
 }
 
 

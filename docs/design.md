@@ -23,7 +23,7 @@
 | キャッシュ・前回との差分・結果 | `results/latest.json` を読んで表示する | 書く |
 
 - **LockWatch は GitHub などのトークンに触れない。**外への通信は、公開リポジトリについての api.osv.dev への問い合わせと、脆弱性 DB の取り直しだけ
-  （言語の版の情報 §3.6 と、人が 1 つずつ頼む `assess` §7.3 は別。`assess` は Claude Code にリポジトリの中を読ませる）
+  （言語の版の情報 §3.6、悪用の情報 §3.7 と、人が 1 つずつ頼む `assess` §7.3 は別。`assess` は Claude Code にリポジトリの中を読ませる）
 - RepoTether は「読むだけ」の方針のまま。書くのは LockWatch の受け渡し場所（`targets.json` と取り込み場所）だけ
 - `targets.json` が無くても、`--repo <フォルダ>` で手元のリポジトリを直接渡せる（公開か分からないので private 扱い、§4）
 
@@ -138,13 +138,19 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
           "malicious": false,
           "summary": "...",
           "published": "2026-09-20T12:00:00Z",
-          "modified": "2026-09-28T03:10:00Z"
+          "modified": "2026-09-28T03:10:00Z",
+          "kev": {"cve": "CVE-2026-0000", "added": "2026-10-01", "ransomware": false},
+          "epss": {"cve": "CVE-2026-0000", "score": 0.74771, "percentile": 0.98832}
         }
       ]
     }
   },
+  "exploits": {"fetched_at": "2026-10-02T09:00:00+09:00", "kev_version": "2026.10.01", "epss_date": "2026-10-01"},
   "new": [
-    {"repo": "github.com/example/web-app", "package": "vite", "id": "GHSA-xxxx-xxxx-xxxx", "severity": "high", "informational": null, "malicious": false}
+    {"repo": "github.com/example/web-app", "package": "vite", "id": "GHSA-xxxx-xxxx-xxxx", "severity": "high", "informational": null, "malicious": false, "kev": true}
+  ],
+  "new_kev": [
+    {"repo": "github.com/example/web-app", "package": "vite", "id": "GHSA-xxxx-xxxx-xxxx", "severity": "high", "cve": "CVE-2026-0000", "added": "2026-10-01"}
   ]
 }
 ```
@@ -181,8 +187,10 @@ RepoTether がクローンしていないリポジトリの lock ファイルを
     **区分も点数も無い `malicious` は `severity` を `critical` にする**（`score` は `null` のまま。区分か点数があればそちらを使う）
   - 直る版は無いのが普通（その版を入れた時点で実行されている）。表示では「悪意あるコード」の印を付ける。`--hide` の種類には入れない（まとめて消せるものにしない）
   - 0.2.0 までの `latest.json` には無い。無ければ `false` として扱う
+- `kev` / `epss`: 悪用の情報（§3.7）。無ければ `null`。0.6.0 までの `latest.json` には無い。無ければ `null` として扱う
+- `exploits`（全体）: 悪用の情報をいつ取ったか（§3.7）。設定で切っている・一度も取れていなければ `null`
 - `new` は前回の `latest.json` に無かった `(repo, package, id)` の組。前回が無ければ空（初回にすべてを「新しい」と言わない）。
-  各項目にも `severity`・`informational`・`malicious` を入れる（表示する側が `latest.json` を引き直さずにフィルタできるように）。
+  各項目にも `severity`・`informational`・`malicious`・`kev`（KEV に載っているか。真偽）を入れる（表示する側が `latest.json` を引き直さずにフィルタできるように）。
   リポジトリ単位でも同じで、前回の `latest.json` に無かったリポジトリと、前回 `ok` でなかったリポジトリは比べない
   （対象に足したとき・エラーから戻ったときに、全部を「新しい」と言わない）
 
@@ -283,6 +291,32 @@ lock ファイルの照合とは別に、言語そのもの（PHP・Node.js）�
 - 修正版は CVE ごとではなく版の比較で出す（PHP には CVE と影響する版の機械で読める一覧が無い。Node.js の security-wg の一覧は遅れることがある）
 - 設定 `runtime_check: false` なら取りに行かず、言語の結果も出さない
 - 診断書には「言語」の節、一覧と社員向けの一覧には「言語」の列（注意の要るものだけ）、社員向けの一覧には 30 日以内のお知らせの欄を出す
+
+### 3.7 悪用の情報（`kev`・`epss`）
+
+脆弱性の数と深刻度だけでは、どれから直すかが決まらない（2026-10-23 の手元の結果は 1,836 件で、そのうち high 以上が半分近い）。
+そこで、**実際に悪用されているか**と**悪用される見込み**を、OSV とは別の公開の一覧から付ける。見つける部分は今のまま osv-scanner に任せ、ここでは印を付けるだけ。
+
+| 何を | どこから |
+|---|---|
+| 実際の攻撃に使われたと確認された CVE（CISA KEV）。載った日・ランサムウェアで使われたか | `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json`（約 1.8 MB、1,754 件） |
+| CVE ごとの「30 日以内に悪用が観測される確率」と、その順位（FIRST EPSS） | `https://epss.empiricalsecurity.com/epss_scores-current.csv.gz`（約 2.8 MB、39 万件。日ごとのファイルへの転送で返る） |
+
+- **一覧を丸ごと取るだけで、CVE の番号も、パッケージ名も送らない**（§4 と両立する。照合は手元で行う）
+- 取ったものは `<data>/exploits.json`（KEV から要るものだけと、取った時刻・版）と `<data>/epss.csv.gz`（取ったまま）に置く。
+  `cache_max_age_hours` より新しければ取り直さない。取れなければ前のものを使い、照合の注意に書く（照合は止めない）。EPSS は読めることを確かめてから入れ替える
+- 突き合わせは、findings の `id` と `aliases` のうち `CVE-` で始まるもの（GHSA などの記録の多くは別名に CVE を持つ。手元の結果では 93%）
+  - `kev`: そのどれかが KEV にあれば `{"cve", "added"（載った日）, "ransomware"（ランサムウェアでの悪用が確認されているか）}`。無ければ `null`
+  - `epss`: そのうち点数の一番高いものの `{"cve", "score"（確率 0〜1）, "percentile"（全 CVE の中での順位 0〜1）}`。無ければ `null`
+- 深刻度（`severity`）は変えない。並べるときに、同じ深刻度の中で KEV のものを先に、次に EPSS の高い順にする
+- キャッシュには入れず、照合のたびに付け直す（一覧は毎日変わる。lock ファイルが同じでも、昨日は無かった KEV の印が付く）
+- `new_kev`: 前回の `latest.json` で KEV の印が無く、今回付いた findings（`[{"repo", "package", "id", "severity", "cve", "added"}]`）。
+  前回から新しく出た findings は `new` に入るので、ここには入れない。比べ方は `new` と同じで、加えて前回の結果に `exploits` が無い
+  （悪用の情報を入れる前の版で書いた、切っていた、取れていなかった）ときは空（初回にすべてを「新しい」と言わない）。`scan --id` はそのリポジトリの分だけ入れ替える
+- 設定 `exploit_check: false` なら取りに行かず、`kev`・`epss` は `null`、`exploits` も `null`
+- 表示: `report` の行に `[KEV]`（ランサムウェアなら `[KEV ransomware]`）と `EPSS n%`。診断書の表に「悪用」の列と「悪用が確認されたものだけ」、要約の最初に KEV の件数、
+  対応の節では KEV のあるパッケージを先に並べる。一覧と社員向けの一覧に「悪用」の件数の列。画面の結果のタブに「悪用」の列。`assess` にも渡す（急ぐかの判断に使わせる）
+- 手元の結果（2026-10-23）では、KEV が 4 件（そのうちランサムウェア 1 件）、EPSS 0.1 以上が 21 件だった
 
 ## 4. private は外に送らない
 
@@ -532,6 +566,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
   "cache_max_age_hours": 20,
   "keep_results": 30,
   "runtime_check": true,
+  "exploit_check": true,
   "exclude_dirs": ["vendor", "vendors", "third_party", "third-party", "bower_components", "node_modules"]
 }
 ```
@@ -542,6 +577,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 - `targets`: 空なら `<data>/targets.json`
 - `keep_results`: `results/` に残す過去の結果の数
 - `runtime_check`: 言語（PHP・Node.js）の版も調べるか（§3.6）。切ると endoflife.date・php.net・nodejs.org に取りに行かない
+- `exploit_check`: 悪用の情報（CISA KEV・EPSS）を付けるか（§3.7）。切ると cisa.gov・epss.empiricalsecurity.com に取りに行かない
 
 ## 9. 画面（`lockwatch gui`）
 
@@ -555,7 +591,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 | タブ | 中身 |
 |---|---|
 | 状態 | `status` の内容。ボタン: 全体を照合（`scan`）・DB を取り直す（`db-update`）・定期実行を登録 / 解除（`scripts/register-task.ps1`）・前回のログを開く（`last-run.log`）。動かした仕事の出力を下に出す |
-| 結果 | `latest.json` の一覧（リポジトリ・パッケージ・版・深刻度・ID・直る版・知らせの種類・lock ファイル）。重い順。悪意あるコード（`malicious`）は知らせの列に「悪意あるコード」と出す。「隠す」（深刻度・知らせの種類）、「新しく出たものだけ」、文字で絞り込み。行をダブルクリックすると `https://osv.dev/vulnerability/<id>` を開く |
+| 結果 | `latest.json` の一覧（リポジトリ・パッケージ・版・深刻度・ID・直る版・知らせの種類・lock ファイル・悪用（§3.7））。重い順（同じ深刻度なら KEV、EPSS の高い順）。悪意あるコード（`malicious`）は知らせの列に「悪意あるコード」と出す。「隠す」（深刻度・知らせの種類）、「新しく出たものだけ」、文字で絞り込み。行をダブルクリックすると `https://osv.dev/vulnerability/<id>` を開く |
 | 台帳 | 全依存の台帳（`packages.json`、§3.4）を引く。名前と版を入れると、使っているところを「パッケージ・版・生態系・リポジトリ・lock ファイル」で出す。名前は大文字小文字を区別しない部分一致（`*` `?` を書いたときは、`lockwatch packages` と同じく全体の一致）。版は文字どおりの一致。名前も版も空なら何も出さない（全件は多すぎる）。出すのは先頭 2,000 行までで、件数は全部を数える。照合はしない |
 | 注意 | `latest.json` の注意（§3.5）の一覧（リポジトリ・種類・パッケージ・版・詳細・lock ファイル）。種類ごとに「隠す」、「新しく出たものだけ」、文字で絞り込み |
 | 調べたファイル | `latest.json` の `lockfiles` と `excluded`（§3.3）の一覧（リポジトリ・状態・照合・lock ファイル・扱い・件数・注意）。lock ファイル 1 つが 1 行。lock ファイルの無いリポジトリも 1 行出す（ファイルの欄は空）。件数と注意はその lock ファイルの分で、照合済みで調べたものだけに出す。「対象外を隠す」、文字で絞り込み（リポジトリ・lock ファイル）。0 件のリポジトリが何を見て 0 件だったのかを確かめる場所 |

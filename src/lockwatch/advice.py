@@ -70,14 +70,17 @@ def _upgrades(findings: list[dict], unpinned: set[tuple[str, str]]) -> list[dict
             else:
                 above = None
         counts = {s: sum(1 for f in items if f.get("severity") == s) for s in fold.SEVERITIES}
+        # 実際の攻撃に使われたと確認されたもの（CISA KEV、design.md §3.7）
+        kev = sorted({f["kev"]["cve"] for f in items if isinstance(f.get("kev"), dict) and f["kev"].get("cve")})
         out.append({
             "action": "upgrade", "lockfile": lockfile, "ecosystem": ecosystem, "package": package, "version": version,
             "target": target, "above": above,
             "count": len(items), "severities": {s: n for s, n in counts.items() if n},
             "unfixed": sorted(unfixed), "unclear": sorted(unclear), "by_last_affected": sorted(by_last),
-            "unpinned": (lockfile, package.lower()) in unpinned,
+            "unpinned": (lockfile, package.lower()) in unpinned, "kev": kev,
         })
-    out.sort(key=lambda a: (min(order.get(s, 99) for s in a["severities"]), -a["count"], a["lockfile"], a["package"].lower()))
+    # 悪用が確認されたもの（KEV）を先に。次に重い順
+    out.sort(key=lambda a: (not a["kev"], min(order.get(s, 99) for s in a["severities"]), -a["count"], a["lockfile"], a["package"].lower()))
     return out
 
 

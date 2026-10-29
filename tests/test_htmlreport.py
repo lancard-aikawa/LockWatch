@@ -83,8 +83,8 @@ class RenderTest(unittest.TestCase):
 
     def test_rows_carry_filter_and_sort_keys(self):
         page = self.render("github.com/example/web-app", new_ids={("requests", "PYSEC-1")})
-        self.assertIn('<tr data-sev="high" data-info="" data-new="1" data-fixed="1" data-rank="1025">', page)  # 高・7.5
-        self.assertIn('data-sev="critical" data-info="" data-new="0" data-fixed="0" data-rank="100"', page)  # 点数なしは 0 点扱い
+        self.assertIn('<tr data-sev="high" data-info="" data-new="1" data-fixed="1" data-kev="0" data-rank="1025">', page)  # 高・7.5
+        self.assertIn('data-sev="critical" data-info="" data-new="0" data-fixed="0" data-kev="0" data-rank="100"', page)  # 点数なしは 0 点扱い
         self.assertIn('<div class="filters" hidden>', page)  # JS が動かなければ出さない
         # 隠すの候補は、その診断書にある深刻度だけ
         self.assertIn('data-hide="sev" value="low"', page)

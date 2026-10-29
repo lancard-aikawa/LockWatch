@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from . import __version__, advice, fold, hygiene, runtimes, store
+from . import __version__, advice, exploits, fold, hygiene, runtimes, store
 
 GENERATOR = f"LockWatch {__version__}"
 _GENERATOR_MARK = '<meta name="generator" content="LockWatch'
@@ -58,7 +58,9 @@ def _time(s) -> str:
 
 def _sorted(findings: list[dict]) -> list[dict]:
     order = {s: i for i, s in enumerate(fold.SEVERITIES)}
-    return sorted(findings, key=lambda f: (order.get(f.get("severity"), 99), -(f.get("score") or 0), f.get("package", ""), f.get("id", "")))
+    # 同じ深刻度なら、悪用が確認されたもの（KEV）を先に（design.md §3.7）
+    return sorted(findings, key=lambda f: (order.get(f.get("severity"), 99), not f.get("kev"), -(f.get("score") or 0), -exploits.score(f),
+                                           f.get("package", ""), f.get("id", "")))
 
 
 def _counts(findings: list[dict]) -> dict[str, int]:
@@ -138,7 +140,7 @@ th[aria-sort=descending] button::after { content: " \\25BC"; color: var(--fg); }
 # 絞り込みと並べ替え（design.md §7.1）。両方のページで同じものを使う。JS が動かなければ絞り込みの欄は出ない（hidden のまま）。
 #   絞り込み: input[data-hide=<属性>] の value と行の data-<属性> が同じなら隠す。input[data-only=<属性>] は data-<属性>="1" の行だけ。
 #            input[data-text] は行の文字に含むものだけ
-#   並べ替え: th[data-sort] のボタン。rank は行の data-rank（深刻度の重さ）、num は数、text は文字の順
+#   並べ替え: th[data-sort] のボタン。rank は行の data-rank（深刻度の重さ）、key はマスの data-key の数、num は数、text は文字の順
 _JS = """
 (function () {
   var table = document.querySelector("table[data-lw]");
@@ -181,6 +183,7 @@ _JS = """
       var keyed = Array.prototype.map.call(body.rows, function (r, j) {
         var k;
         if (kind === "rank") k = Number(r.dataset.rank);
+        else if (kind === "key") k = Number(r.cells[i].dataset.key || 0);
         else {
           var t = r.cells[i].textContent.trim();
           if (kind === "num") { k = parseFloat(t); if (isNaN(k)) k = -Infinity; } else k = t.toLowerCase();
@@ -239,7 +242,8 @@ def _tiles(n: dict[str, int], extra: list[tuple[str, int]]) -> str:
 
 def _footer(made_at: datetime, n_hidden: int, hide: set[str]) -> str:
     parts = [f"{_e(GENERATOR)} が {_e(made_at.strftime('%Y-%m-%d %H:%M'))} に作成。"
-             "脆弱性の情報は OSV（https://osv.dev）による。詳しい説明は ID のリンク先を参照。"]
+             "脆弱性の情報は OSV（https://osv.dev）による。詳しい説明は ID のリンク先を参照。"
+             "悪用の情報は CISA の Known Exploited Vulnerabilities と FIRST の EPSS による。"]
     if hide:
         labels = "・".join(SEVERITY_LABEL.get(h) or INFORMATIONAL_LABEL.get(h, h) for h in sorted(hide))
         parts.append(f"「{_e(labels)}」の {n_hidden} 件をこの診断書から除いています。")
@@ -347,15 +351,18 @@ def render_repo(rid: str, entry: dict, latest: dict, *, new_ids: set[tuple[str, 
         n_new = sum(1 for f in findings if (f.get("package"), f.get("id")) in new_ids)
         n_fixed = sum(1 for f in findings if fold.fixed_text(f))
         n_mal = sum(1 for f in findings if f.get("malicious"))
+        n_kev = _n_kev(findings)
         out.append("<h2>要約</h2>")
         if n_mal:
             out.append(f'<p class="mal">悪意あるコードとして報告されたパッケージが {n_mal} 件あります。'
                        "その版を入れた環境は、侵害されたものとして扱ってください。</p>")
+        if n_kev:
+            out.append(f'<p class="mal">実際の攻撃に使われたと確認された脆弱性（CISA KEV）が {n_kev} 件あります。深刻度に関わらず先に直してください。</p>')
         if findings:
             out.append(f"<p>{len(findings)} 件の脆弱性・知らせが見つかりました。</p>")
         else:
             out.append('<p class="ok">既知の脆弱性は見つかりませんでした。</p>')
-        out.append(_tiles(_counts(findings), [("直る版あり", n_fixed), ("前回から新規", n_new)]))
+        out.append(_tiles(_counts(findings), [("悪用あり（KEV）", n_kev), ("直る版あり", n_fixed), ("前回から新規", n_new)]))
         acts = advice.actions(findings, entry.get("notices") or [])
         if acts:
             out.append(_actions_section(acts))
@@ -366,7 +373,8 @@ def render_repo(rid: str, entry: dict, latest: dict, *, new_ids: set[tuple[str, 
             out.append(_filters(
                 [("sev", [(s, SEVERITY_LABEL[s]) for s in fold.SEVERITIES if s in present]),
                  ("info", [(k, v) for k, v in INFORMATIONAL_LABEL.items() if k in infos])],
-                [("new", "新規だけ"), ("fixed", "直る版があるものだけ")], "（重い順。見出しを押すと並べ替え）"))
+                [("kev", "悪用が確認されたものだけ"), ("new", "新規だけ"), ("fixed", "直る版があるものだけ")],
+                "（重い順。同じ深刻度なら悪用が確認されたものが先。見出しを押すと並べ替え）"))
             out.append(_findings_table(findings, new_ids))
 
     notices = entry.get("notices") or []
@@ -443,7 +451,11 @@ def _action_item(a: dict) -> str:
             extra.append("直る版を確かめるもの: " + "、".join(_e(i) for i in a["unclear"]))
         if a["unfixed"]:
             extra.append("直る版がまだ無いもの: " + "、".join(_e(i) for i in a["unfixed"]))
-        return (f'<li><span class="tag">版を上げる</span> {head} {where}。{a["count"]} 件（{_e(counts)}）'
+        kev = a.get("kev") or []
+        if kev:
+            extra.insert(0, "実際の攻撃に使われたと確認されています（CISA KEV）: " + "、".join(_e(i) for i in kev) + "。急いでください")
+        mark = ' <span class="tag mal">悪用あり</span>' if kev else ""
+        return (f'<li><span class="tag">版を上げる</span>{mark} {head} {where}。{a["count"]} 件（{_e(counts)}）'
                 + "".join(f"<br><span class=\"muted\">{x}</span>" for x in extra) + "</li>")
     label = hygiene.KIND_LABEL.get(a.get("kind"), a.get("kind"))
     todo = {"not-registry": "取得元が意図したものかを確かめる", "no-integrity": "lock ファイルを作り直してハッシュを入れる",
@@ -482,6 +494,21 @@ def _title(raw, label: str) -> str:
     return f' title="{label} {_e(_day(raw))}"' if _day(raw) else ""
 
 
+def _exploit_cell(f: dict) -> str:
+    """悪用の列（design.md §3.7）: KEV の印と EPSS の %。どちらも無ければ -"""
+    parts = []
+    kev = f.get("kev")
+    if isinstance(kev, dict):
+        label = "KEV ランサムウェア" if kev.get("ransomware") else "KEV"
+        parts.append(f'<span class="tag mal" title="{_e(kev.get("cve"))} が {_e(kev.get("added"))} に KEV に追加">{label}</span>')
+    epss = exploits.epss_text(f)
+    if epss:
+        e = f["epss"]
+        top = (1 - (e.get("percentile") or 0)) * 100
+        parts.append(f'<span class="mono" title="{_e(e.get("cve"))} が 30 日以内に悪用される確率（全 CVE の上位 {top:.1f}%）">EPSS {_e(epss)}</span>')
+    return "<br>".join(parts) or '<span class="muted">-</span>'
+
+
 def _findings_table(findings: list[dict], new_ids: set[tuple[str, str]]) -> str:
     rows = []
     for f in findings:
@@ -497,14 +524,19 @@ def _findings_table(findings: list[dict], new_ids: set[tuple[str, str]]) -> str:
         if f.get("informational"):
             tags.append(f'<span class="tag">{_e(INFORMATIONAL_LABEL.get(f["informational"], f["informational"]))}</span>')
         fixed = fold.fixed_text(f)
+        kev = f.get("kev") if isinstance(f.get("kev"), dict) else None
+        exploit = _exploit_cell(f)
+        # 悪用の列の並べ替えの鍵: KEV を一番上に、次に EPSS の高い順
+        exploit_key = (2 if kev else 0) + exploits.score(f)
         # 深刻度の列の並べ替えの鍵: 重い順、同じ深刻度なら点数の高い順
         rank = fold.SEVERITIES.index(sev) * 1000 + round((10 - (score if isinstance(score, (int, float)) else 0)) * 10)
         is_new = (f.get("package"), vid) in new_ids
         rows.append(
             f'<tr data-sev="{sev}" data-info="{_e(f.get("informational") or "")}" data-new="{int(is_new)}"'
-            f' data-fixed="{int(bool(fixed))}" data-rank="{rank}">'
+            f' data-fixed="{int(bool(fixed))}" data-kev="{int(bool(kev))}" data-rank="{rank}">'
             f'<td><span class="sev {sev}">{SEVERITY_LABEL[sev]}</span></td>'
             f'<td class="num">{_e(f"{score:.1f}") if isinstance(score, (int, float)) else "-"}</td>'
+            f'<td class="nowrap" data-key="{exploit_key:.5f}">{exploit}</td>'
             f'<td class="nowrap"><span class="mono">{_e(f.get("package"))}</span><br><span class="muted mono">{_e(f.get("version"))}</span></td>'
             f'<td class="mono">{_e(fixed) if fixed else "<span class=muted>なし</span>"}</td>'
             f'<td class="mono nowrap"{_title(f.get("modified"), "更新")}>{_e(_day(f.get("published"))) or "<span class=muted>-</span>"}</td>'
@@ -514,7 +546,7 @@ def _findings_table(findings: list[dict], new_ids: set[tuple[str, str]]) -> str:
             f'<td class="mono path">{_e(f.get("lockfile"))}</td>'
             "</tr>"
         )
-    head = ("<tr>" + _th("深刻度", "rank") + _th("点数", "num", "num") + _th("パッケージ / 版", "text") + _th("直る版", "text") + _th("発行日", "text")
+    head = ("<tr>" + _th("深刻度", "rank") + _th("点数", "num", "num") + _th("悪用", "key") + _th("パッケージ / 版", "text") + _th("直る版", "text") + _th("発行日", "text")
             + _th("ID", "text") + _th("概要", "text") + _th("lock ファイル", "text") + "</tr>")
     return _table(head, rows)
 
@@ -552,13 +584,13 @@ def render_index(repos: dict[str, dict], latest: dict, names: dict[str, str], *,
         rows.append(
             f'<tr data-vis="{vis}" data-has="{int(bool(e.get("findings")))}">'
             f'<td><a class="mono path" href="{_e(quote(names[rid]))}.html">{_e(rid)}</a></td>'
-            f"<td>{_e(VISIBILITY_LABEL[vis])}</td><td>{_e(STATUS_LABEL.get(status, status))}</td>{cells}"
+            f"<td>{_e(VISIBILITY_LABEL[vis])}</td><td>{_e(STATUS_LABEL.get(status, status))}</td>{cells}{_kev_cell(e.get('findings'))}"
             f'<td class="num">{len(e.get("notices") or []) or "<span class=muted>0</span>"}</td>'
             f'<td>{_runtime_brief(e.get("runtimes"))}</td></tr>'
         )
     head = ("<tr>" + _th("リポジトリ", "text") + _th("公開の区分", "text") + _th("状態", "text") + "".join(
         _th(f'<span class="sev {s}">{SEVERITY_LABEL[s]}</span>', "num", "num") for s in fold.SEVERITIES)
-        + _th("注意", "num", "num") + _th("言語", "text") + "</tr>")
+        + _th("悪用", "num", "num") + _th("注意", "num", "num") + _th("言語", "text") + "</tr>")
     present = {visibility_of(e) for e in repos.values()}
     private = present != {"public"} and bool(present)
     body = [
@@ -569,7 +601,7 @@ def render_index(repos: dict[str, dict], latest: dict, names: dict[str, str], *,
         body.append('<div class="notice">非公開のリポジトリの依存の一覧を含みます。社外に出さないでください。</div>')
     body += [
         "<h2>全体</h2>",
-        _tiles(total, [("前回から新規", n_new)]),
+        _tiles(total, [("悪用あり（KEV）", _n_kev(f for e in repos.values() for f in e.get("findings") or [])), ("前回から新規", n_new)]),
         "<h2>リポジトリ</h2>",
         _filters([("vis", [(v, label) for v, label in VISIBILITY_LABEL.items() if v in present])],
                  [("has", "見つかったものがあるリポジトリだけ")], "（見出しを押すと並べ替え）"),
@@ -596,6 +628,16 @@ SHARE_GUIDE = f"""
 <li><strong>鮮度</strong>: 下の「照合」の時刻より後に公表された脆弱性は入っていません。何日も前のままなら、照合が止まっています。</li>
 </ul>
 """
+
+
+def _n_kev(findings) -> int:
+    return sum(1 for f in findings if f.get("kev"))
+
+
+def _kev_cell(findings) -> str:
+    """一覧の「悪用」の列: 実際の攻撃に使われたと確認された（CISA KEV）ものの件数"""
+    n = _n_kev(findings or [])
+    return f'<td class="num"><span class="tag mal">{n}</span></td>' if n else '<td class="num"><span class="muted">0</span></td>'
 
 
 def _newest_published(findings: list[dict]) -> str:
@@ -636,14 +678,14 @@ def render_share_index(entries: list[tuple[str, str, dict | None]], retired: lis
             state = STATUS_LABEL.get(e.get("status", "error"), e.get("status"))
         rows.append(
             f'<tr data-grp="{_e(group)}" data-has="{int(bool(findings))}"><td class="nowrap">{_e(group)}</td><td>{name}</td>'
-            f"<td>{_e(state)}</td>{cells}"
+            f"<td>{_e(state)}</td>{cells}{_kev_cell(findings)}"
             f'<td class="num">{len((e or {}).get("notices") or []) or "<span class=muted>0</span>"}</td>'
             f'<td class="mono nowrap">{_e(_newest_published(findings)) or "<span class=muted>-</span>"}</td>'
             f'<td>{_runtime_brief((e or {}).get("runtimes"))}</td></tr>'
         )
     head = ("<tr>" + _th("場所", "text") + _th("リポジトリ", "text") + _th("状態", "text") + "".join(
         _th(f'<span class="sev {s}">{SEVERITY_LABEL[s]}</span>', "num", "num") for s in fold.SEVERITIES)
-        + _th("注意", "num", "num") + _th("最新の発行日", "text") + _th("言語", "text") + "</tr>")
+        + _th("悪用", "num", "num") + _th("注意", "num", "num") + _th("最新の発行日", "text") + _th("言語", "text") + "</tr>")
     groups = sorted({g for g, _, _ in entries}, key=str.lower)
     body = [
         "<h1>脆弱性の一覧（社内）</h1>",
@@ -652,7 +694,7 @@ def render_share_index(entries: list[tuple[str, str, dict | None]], retired: lis
         '<div class="notice">社内のリポジトリの依存の一覧を含みます。社外に出さないでください。</div>',
         SHARE_GUIDE,
         "<h2>全体</h2>",
-        _tiles(total, [("前回から新規", n_new),
+        _tiles(total, [("悪用あり（KEV）", _n_kev(f for _, _, e in entries for f in (e or {}).get("findings") or [])), ("前回から新規", n_new),
                        ("言語に注意", sum(1 for _, _, e in entries if any(runtimes.needs_attention(r) for r in (e or {}).get("runtimes") or [])))]),
         _advisories_section(advisories, entries),
         "<h2>リポジトリ</h2>",

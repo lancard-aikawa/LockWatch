@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import __version__
 from . import config as cfgmod
-from . import assess, fold, htmlreport, hygiene, osv, runtimes, store
+from . import assess, exploits, fold, htmlreport, hygiene, osv, runtimes, store
 from . import packages as pkgmod
 from . import scan as scanmod
 from . import status as statusmod
@@ -139,13 +139,19 @@ def _counts(findings: list[dict]) -> str:
 
 
 def _note(f: dict) -> str:
-    """悪意あるコード・知らせの種類の印"""
-    return ("  [malicious]" if f.get("malicious") else "") + (f"  [{f['informational']}]" if f.get("informational") else "")
+    """悪意あるコード・知らせの種類・悪用（design.md §3.7）の印"""
+    kev = f.get("kev")
+    out = ("  [malicious]" if f.get("malicious") else "") + (f"  [{f['informational']}]" if f.get("informational") else "")
+    if kev:
+        out += "  [KEV ransomware]" if isinstance(kev, dict) and kev.get("ransomware") else "  [KEV]"
+    epss = exploits.epss_text(f)
+    return out + (f"  EPSS {epss}" if epss else "")
 
 
 def _print_findings(findings: list[dict]) -> None:
     order = {s: i for i, s in enumerate(fold.SEVERITIES)}
-    for f in sorted(findings, key=lambda f: (order.get(f["severity"], 99), f["package"], f["id"])):
+    # 同じ深刻度なら、悪用が確認されたもの（KEV）、悪用の見込み（EPSS）の高い順
+    for f in sorted(findings, key=lambda f: (order.get(f["severity"], 99), not f.get("kev"), -exploits.score(f), f["package"], f["id"])):
         fixed = fold.fixed_text(f) or "-"
         note = _note(f)
         print(f"  {f['severity']:<8} {f['package']} {f['version']}  {f['id']}{note}  直る版 {fixed}  （{f['lockfile']}）")
@@ -184,6 +190,15 @@ def _print_new(new: list[dict]) -> None:
     for n in new:
         note = _note(n)
         print(f"  {n['severity']:<8} {n['repo']}  {n['package']}  {n['id']}{note}")
+
+
+def _print_new_kev(new: list[dict]) -> None:
+    """前回は KEV に無く、今回載ったもの（design.md §3.7 の new_kev）"""
+    if not new:
+        return
+    print(f"新しく悪用が確認されたもの（CISA KEV）: {len(new)} 件")
+    for n in new:
+        print(f"  {n['severity']:<8} {n['repo']}  {n['package']}  {n['id']}  {n.get('cve')}（{n.get('added')} に KEV に追加）")
 
 
 def _print_new_notices(new: list[dict], list_them: bool = True) -> None:
@@ -258,12 +273,12 @@ def _cmd_scan(args, cfg: dict) -> int:
         with store.exclusive(data):
             at = store.now()
             rt, rt_warning = runtimes.load_or_fetch(data, cfg, at)
+            ex, ex_warning = exploits.load_or_fetch(data, cfg, at)
             out = scanmod.run(targets, data=data, cfg=cfg, exe=exe, scanner_version=ver, at=at, use_cache=not args.no_cache,
-                              runtime_data=rt)
-            if rt_warning:
-                out.warnings.append(rt_warning)
+                              runtime_data=rt, exploit_data=ex)
+            out.warnings += [w for w in (rt_warning, ex_warning) if w]
             if not args.repo:
-                _write_scan_results(data, cfg, out, ver, at, only_id=args.id)
+                _write_scan_results(data, cfg, out, ver, at, only_id=args.id, exploit_meta=ex.meta if ex else None)
             store.cache_prune(data, cfg["cache_max_age_hours"], at)
     except store.Busy as e:
         print(e, file=sys.stderr)
@@ -281,6 +296,7 @@ def _cmd_scan(args, cfg: dict) -> int:
         new = [n for n in latest.get("new", []) if not args.id or n.get("repo") == args.id]
         print(f"新しく出たもの: {len(new)} 件（{store.results_dir(data) / 'latest.json'}）")
         _print_new(new)
+        _print_new_kev([n for n in latest.get("new_kev") or [] if not args.id or n.get("repo") == args.id])
         _print_new_notices([n for n in latest.get("new_notices") or [] if not args.id or n.get("repo") == args.id])
     return EXIT_SCANNER if out.scanner_failed else EXIT_OK
 
@@ -322,8 +338,9 @@ def _cmd_report(args, cfg: dict) -> int:
     if args.share:
         return _write_share(args, cfg, data, latest, repos, new, hide)
     new_notices = [n for n in latest.get("new_notices") or [] if not args.id or n.get("repo") == args.id]
+    new_kev = [n for n in latest.get("new_kev") or [] if not args.id or n.get("repo") == args.id]
     if args.json:
-        obj = new if args.new else {**latest, "repos": repos, "new": new, "new_notices": new_notices}
+        obj = new if args.new else {**latest, "repos": repos, "new": new, "new_notices": new_notices, "new_kev": new_kev}
         print(json.dumps(obj, ensure_ascii=False, indent=2))
         return EXIT_OK
 
@@ -331,6 +348,7 @@ def _cmd_report(args, cfg: dict) -> int:
     if args.new:
         print(f"新しく出たもの: {len(new)} 件")
         _print_new(new)
+        _print_new_kev(new_kev)
     else:
         for rid, e in repos.items():
             _print_repo(rid, e, files=bool(args.id))
@@ -484,7 +502,7 @@ def _write_packages(data: Path, out, only_id: str | None) -> None:
     store.write_packages(data, repos)
 
 
-def _write_scan_results(data: Path, cfg: dict, out, ver: str, at, only_id: str | None) -> None:
+def _write_scan_results(data: Path, cfg: dict, out, ver: str, at, only_id: str | None, exploit_meta: dict | None = None) -> None:
     _write_packages(data, out, only_id)
     prev = store.load_latest(data)
     if only_id and prev is not None:
@@ -494,6 +512,8 @@ def _write_scan_results(data: Path, cfg: dict, out, ver: str, at, only_id: str |
         doc["new"] = [n for n in prev.get("new") or [] if n.get("repo") != only_id] + store.new_findings(prev, out.repos)
         doc["new_notices"] = ([n for n in prev.get("new_notices") or [] if n.get("repo") != only_id]
                               + store.new_notices(prev, out.repos))
+        doc["new_kev"] = [n for n in prev.get("new_kev") or [] if n.get("repo") != only_id] + store.new_kev(prev, out.repos)
+        doc["exploits"] = exploit_meta
         doc["osv_scanner"] = ver
         if out.db_downloaded_at:
             doc["db_downloaded_at"] = out.db_downloaded_at
@@ -507,6 +527,8 @@ def _write_scan_results(data: Path, cfg: dict, out, ver: str, at, only_id: str |
         "repos": out.repos,
         "new": store.new_findings(prev, out.repos),
         "new_notices": store.new_notices(prev, out.repos),
+        "exploits": exploit_meta,
+        "new_kev": store.new_kev(prev, out.repos),
     }
     store.write_results(data, doc, at, history=not only_id, keep=cfg["keep_results"])
 

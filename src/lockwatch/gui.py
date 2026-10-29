@@ -20,7 +20,7 @@ from tkinter import filedialog, ttk
 
 from . import __version__
 from . import config as cfgmod
-from . import fold, hygiene, store
+from . import exploits, fold, hygiene, store
 from . import packages as pkgmod
 from . import status as statusmod
 from .paths import app_dir, data_dir, targets_path
@@ -48,6 +48,8 @@ CONFIG_FIELDS = [
     ("keep_results", "残す過去の結果の数", "int", "results/ に残す数"),
     ("runtime_check", "言語 (PHP・Node.js) の版も調べる", "bool",
      "サポート終了と、新しいセキュリティリリースを見る。endoflife.date・php.net・nodejs.org から言語の情報だけを取る (リポジトリの情報は送らない)"),
+    ("exploit_check", "悪用の情報 (CISA KEV・EPSS) を付ける", "bool",
+     "実際の攻撃に使われたか (KEV) と、悪用される見込み (EPSS) を見る。cisa.gov・epss.empiricalsecurity.com から一覧を丸ごと取るだけ (CVE もリポジトリの情報も送らない)"),
     ("exclude_dirs", "対象から外すフォルダ名", "list",
      "この名前のフォルダの中の lock ファイルは調べない (ほかの人のコードを取り込んだフォルダ)。, で区切る。* ? を書ける。空にすると何も外さない"),
 ]
@@ -70,7 +72,8 @@ def ensure_notebook_style(name: str = "LockWatch.TNotebook") -> str:
 
 
 def result_rows(latest: dict | None, hide: set[str], new_only: bool, text: str) -> list[tuple]:
-    """結果のタブの行: (repo, package, version, severity, id, fixed, informational, lockfile)。重い順。
+    """結果のタブの行: (repo, package, version, severity, id, fixed, informational, lockfile, 悪用)。重い順で、
+    同じ深刻度なら悪用が確認されたもの（KEV）、悪用の見込み（EPSS）の高い順（design.md §3.7）。
     悪意あるコード（design.md §3.3 の malicious）は、informational の位置に "malicious" を入れる。
     hide は深刻度か知らせの種類。text はリポジトリ・パッケージ・ID の部分一致（大文字小文字を区別しない）"""
     if not latest:
@@ -87,11 +90,20 @@ def result_rows(latest: dict | None, hide: set[str], new_only: bool, text: str) 
                 continue
             if needle and not any(needle in str(x).lower() for x in (rid, f.get("package"), f.get("id"))):
                 continue
-            rows.append((rid, f.get("package", ""), f.get("version", ""), f.get("severity", "unknown"), f.get("id", ""),
-                         fold.fixed_text(f), "malicious" if f.get("malicious") else f.get("informational") or "",
-                         f.get("lockfile", "")))
-    rows.sort(key=lambda r: (order.get(r[3], 99), r[0], r[1], r[4]))
-    return rows
+            row = (rid, f.get("package", ""), f.get("version", ""), f.get("severity", "unknown"), f.get("id", ""),
+                   fold.fixed_text(f), "malicious" if f.get("malicious") else f.get("informational") or "",
+                   f.get("lockfile", ""), exploit_text(f))
+            rows.append(((order.get(row[3], 99), not f.get("kev"), -exploits.score(f), rid, row[1], row[4]), row))
+    rows.sort(key=lambda x: x[0])
+    return [row for _, row in rows]
+
+
+def exploit_text(f: dict) -> str:
+    """悪用の列（design.md §3.7）: KEV（ランサムウェア）と EPSS の %"""
+    kev = f.get("kev")
+    parts = (["KEV ランサムウェア" if kev.get("ransomware") else "KEV"] if isinstance(kev, dict) else [])
+    epss = exploits.epss_text(f)
+    return " ".join(parts + ([f"EPSS {epss}"] if epss else []))
 
 
 def notice_rows(latest: dict | None, hide: set[str], text: str, new_only: bool = False) -> list[tuple]:
@@ -391,7 +403,8 @@ class App:
         table = ttk.Frame(tab)
         table.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(8, 0))
         cols = [("repo", "リポジトリ", 230), ("package", "パッケージ", 140), ("version", "版", 80), ("severity", "深刻度", 60),
-                ("id", "ID", 150), ("fixed", "直る版", 110), ("info", "知らせ", 80), ("lockfile", "lock ファイル", 150)]
+                ("id", "ID", 150), ("fixed", "直る版", 110), ("info", "知らせ", 80), ("lockfile", "lock ファイル", 150),
+                ("exploit", "悪用", 120)]
         self.tree = ttk.Treeview(table, columns=[c[0] for c in cols], show="headings")
         for key, label, width in cols:
             self.tree.heading(key, text=label)
@@ -408,7 +421,7 @@ class App:
         self.tree.delete(*self.tree.get_children())
         for r in rows:
             info = MALICIOUS_LABEL if r[6] == "malicious" else INFORMATIONAL_LABEL.get(r[6], r[6])
-            shown = (*r[:3], SEVERITY_LABEL.get(r[3], r[3]), r[4], r[5], info, r[7])
+            shown = (*r[:3], SEVERITY_LABEL.get(r[3], r[3]), r[4], r[5], info, r[7], r[8])
             self.tree.insert("", tk.END, values=shown)
         if self.latest is None:
             self.result_count.config(text=f"結果がまだありません ({self.data / 'results' / 'latest.json'})。「状態」の「全体を照合」で作れます")
