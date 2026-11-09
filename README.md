@@ -73,6 +73,7 @@ uv run lockwatch report --share               :: 社員向けの一覧を data\s
 uv run lockwatch packages lodash              :: 全依存の台帳を引く（どのリポジトリが lodash のどの版を使っているか。照合はしない）
 uv run lockwatch packages "@babel/*" --version 7.26.0   :: 名前に * ? を書ける。--version・--ecosystem・--id で絞れる。--json でも出せる
 uv run lockwatch assess --id github.com/example/web-app   :: その脆弱性がビルド・リリースにどう効くかを Claude Code に調べさせ、data\assess\ に HTML で書く（数分。照合はしない）
+uv run lockwatch assess --new                 :: 前回の assess の後に増えた脆弱性だけを調べる（github.com の公開のもの。設定 auto_assess のときだけ。定期実行用）
 uv run lockwatch db-update                    :: 脆弱性 DB を取り直す
 uv run lockwatch status                       :: 使える状態か（osv-scanner・受け渡し・最後の照合・定期実行）
 uv run lockwatch targets check targets.json   :: 受け渡しのファイルを検査し、オンライン・手元の振り分けを表示
@@ -97,6 +98,11 @@ uv run lockwatch config show
 - `assess` は、見つかったパッケージが**リリースに入るか、ビルドのときだけか、開発の手元だけか**を、Claude Code（`claude.exe`）にリポジトリの中を読ませて調べる。
   急ぐのはリリースに入るものだけ。Claude には読むことだけさせ（Read・Grep・Glob。コマンドの実行・書き込み・Web は無し）、リポジトリには何も書かない。
   **非公開のリポジトリの中身も Claude（Anthropic）に送る**ので、頼んだときだけ動く（定期実行では動かない）。RepoTether の「Claude に影響を調べさせる」からも呼ぶ（[docs/design.md](docs/design.md) §7.3）
+- `assess --new` は、一度 `assess` したリポジトリに**後から増えた脆弱性だけ**を、定期実行で Claude Code に調べさせる。既定では動かない
+  （`uv run lockwatch config set auto_assess true` で有効にし、`register-task.ps1 -Assess` でタスクを登録する）。
+  対象は **github.com の公開のリポジトリだけ**。前回の判断で「ビルドのときだけ」「開発の手元だけ」「使っていない」だったパッケージは、
+  KEV・悪意あるコードでなければ Claude に聞かずにその判断を使う。1 回に Claude を呼ぶのは `auto_assess_max_repos`（既定 3）リポジトリまで。
+  Claude Code にログインしているアカウントの利用枠（API キーなら料金）を使う。結果は `data\assess\<名前>.new.html` と `data\assess\new.json`（[docs/design.md](docs/design.md) §7.4）
 - 結果（`data\results\latest.json`）の形と、RepoTether との受け渡しの約束は [docs/design.md](docs/design.md) §3
 
 ## 定期実行
@@ -107,6 +113,7 @@ uv run lockwatch config show
 ```cmd
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1                :: 登録（毎日 9:00。-At 13:30 で時刻を変える）
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1 -Unregister    :: 消す
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1 -Assess        :: assess --new のタスク「LockWatch assess」を登録（毎日 9:30。-Assess -Unregister で消す）
 ```
 
 結果は `data\last-run.log`（毎回上書き）と、タスクの「前回の実行結果」

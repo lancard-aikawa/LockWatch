@@ -50,6 +50,10 @@ CONFIG_FIELDS = [
      "サポート終了と、新しいセキュリティリリースを見る。endoflife.date・php.net・nodejs.org から言語の情報だけを取る (リポジトリの情報は送らない)"),
     ("exploit_check", "悪用の情報 (CISA KEV・EPSS) を付ける", "bool",
      "実際の攻撃に使われたか (KEV) と、悪用される見込み (EPSS) を見る。cisa.gov・epss.empiricalsecurity.com から一覧を丸ごと取るだけ (CVE もリポジトリの情報も送らない)"),
+    ("auto_assess", "診断の後に増えた脆弱性を自動で調べる", "bool",
+     "定期実行 (タスク LockWatch assess) で、一度 assess したリポジトリに後から増えた分だけを Claude Code に調べさせる。"
+     "github.com の公開のものだけ。リポジトリの中身が Claude (Anthropic) に送られ、Claude Code の利用枠か料金を使う"),
+    ("auto_assess_max_repos", "自動で調べる数の上限 (1 回)", "int", "1 回の定期実行で Claude Code を呼ぶリポジトリの数。残りは次の回に回す"),
     ("exclude_dirs", "対象から外すフォルダ名", "list",
      "この名前のフォルダの中の lock ファイルは調べない (ほかの人のコードを取り込んだフォルダ)。, で区切る。* ? を書ける。空にすると何も外さない"),
 ]

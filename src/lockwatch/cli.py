@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import __version__
 from . import config as cfgmod
-from . import assess, exploits, fold, htmlreport, hygiene, osv, runtimes, store
+from . import assess, autoassess, exploits, fold, htmlreport, hygiene, osv, runtimes, store
 from . import packages as pkgmod
 from . import scan as scanmod
 from . import status as statusmod
@@ -61,9 +61,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("db-update", help="脆弱性 DB を取り直す")
 
     a = sub.add_parser("assess", help="脆弱性がビルド・リリースにどう効くかを Claude Code に調べさせ、HTML に書く（照合はしない）")
-    a.add_argument("--id", required=True, help="targets.json のうち、この id のリポジトリ")
+    which = a.add_mutually_exclusive_group(required=True)
+    which.add_argument("--id", help="targets.json のうち、この id のリポジトリ")
+    which.add_argument("--new", action="store_true",
+                       help="前回の assess の後に増えた脆弱性だけを調べる（github.com の公開のもの。設定 auto_assess のときだけ。定期実行用）")
     a.add_argument("--model", help="Claude のモデル（既定は Claude Code の既定）")
-    a.add_argument("--last", action="store_true", help="調べずに、前回書いた HTML の場所と時刻を JSON で答える")
+    a.add_argument("--last", action="store_true", help="調べずに、前回書いた HTML の場所と時刻を JSON で答える（--id と一緒に）")
 
     sub.add_parser("gui", help="状態・結果・台帳・注意・設定の画面を開く（pythonw -m lockwatch gui なら黒い窓が出ない）")
 
@@ -592,6 +595,11 @@ def _dispatch(args, config_path: Path, cfg: dict) -> int:
 def _cmd_assess(args, cfg: dict) -> int:
     """ビルド・リリースへの影響を Claude Code に調べさせる（design.md §7.3）。照合はしない"""
     data = data_dir(args.data, cfg["data_dir"])
+    if args.new:
+        if args.last:
+            print("--last は --id と一緒に使います", file=sys.stderr)
+            return EXIT_USAGE
+        return _assess_new(args, cfg, data)
     if args.last:
         return _assess_last(args, data)
     targets = _load_targets(args, cfg, data)
@@ -641,11 +649,111 @@ def _assess_last(args, data: Path) -> int:
     made = store.iso(datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)) if path.is_file() else None
     changed = None
     entry = latest["repos"][args.id]
-    prev = assess.read_input(path) if made else None
-    if prev is not None and entry.get("status") == "ok":
+    block = assess.read_block(path) if made else None
+    if block is not None and entry.get("status") == "ok":
+        # 自動で調べた分（design.md §7.4）も、調べたものに含めて比べる
+        state = autoassess.load(data)["repos"].get(args.id)
+        if state and state.get("based_on") != autoassess.based_on(path):
+            state = None
+        prev = autoassess.merged_input(block, state)
         changed = assess.fingerprint(prev) != assess.fingerprint(assess.build_input(args.id, entry, Path(".")))
     print(json.dumps({"path": str(path), "exists": made is not None, "made_at": made, "changed": changed}, ensure_ascii=False))
     return EXIT_OK
+
+
+def _assess_new(args, cfg: dict, data: Path) -> int:
+    """前回の assess の後に増えた脆弱性だけを調べる（design.md §7.4）"""
+    if not cfg.get("auto_assess"):
+        print("設定 auto_assess が切れているので、何もしません（lockwatch config set auto_assess true で有効にします）")
+        return EXIT_OK
+    try:
+        with store.exclusive(data):
+            return _assess_new_locked(args, cfg, data)
+    except store.Busy as e:
+        print(e, file=sys.stderr)
+        return EXIT_BUSY
+
+
+def _assess_new_locked(args, cfg: dict, data: Path) -> int:
+    targets = _load_targets(args, cfg, data)
+    if targets is None:
+        return EXIT_USAGE
+    latest = store.load_latest(data)
+    if latest is None:
+        print("まだ照合した結果がありません（先に scan）", file=sys.stderr)
+        return EXIT_USAGE
+    names = htmlreport.file_names(latest["repos"])
+    doc = autoassess.load(data)
+    made_at = store.iso(store.now())
+    touched: set[str] = set()
+    queue = []  # (重さ, id, target, 渡すもの)
+    for t in targets:
+        entry = latest["repos"].get(t.id)
+        if not autoassess.eligible(t) or entry is None or entry.get("status") != "ok":
+            continue
+        html = data / "assess" / f"{names[t.id]}.html"
+        if not html.is_file():
+            continue  # 一度も assess していないものは対象にしない（最初の 1 回は人が頼む）
+        block = assess.read_block(html)
+        if block is None:
+            print(f"{t.id}: 前回の assess の HTML が読めないので飛ばします（{html}）")
+            continue
+        base = autoassess.based_on(html)
+        state = autoassess.repo_state(doc, t.id, base)
+        delta = autoassess.delta_input(t.id, entry, t.root, autoassess.known(block, state))
+        if delta is None:
+            continue
+        prev = autoassess.previous(block, state, base)
+        reuse, ask = autoassess.split(delta, prev)
+        if reuse:
+            state["items"] += autoassess.reused_items(reuse, prev, made_at)
+            state["updated_at"] = made_at
+            touched.add(t.id)
+            print(f"{t.id}: {len(reuse)} パッケージは前回の判断を使いました")
+        if ask:
+            queue.append((autoassess.weight(ask), t.id, t, autoassess.ask_input(delta, ask, prev), base))
+    queue.sort(key=lambda q: (q[0], q[1]))
+    limit = cfg.get("auto_assess_max_repos") or 3
+    run, rest = queue[:limit], queue[limit:]
+    code = EXIT_OK
+    total = 0.0
+    if run:
+        try:
+            exe = assess.find_claude()
+        except assess.AssessError as e:
+            print(e, file=sys.stderr)
+            run, code = [], EXIT_CLAUDE
+        for _, rid, t, inp, base in run:
+            print(f"{rid}: Claude Code に調べさせています（{len(inp['packages'])} パッケージ）…", flush=True)
+            note = autoassess.NOTE.format(based_on=base)
+            try:
+                result = assess.run_claude(exe, assess.build_prompt(inp, note), cwd=data / "assess", root=t.root, model=args.model)
+            except assess.AssessError as e:
+                print(f"{rid}: {e}", file=sys.stderr)
+                code = EXIT_CLAUDE  # このリポジトリは入れず、次の回にもう一度調べる
+                continue
+            answer = result["structured_output"]
+            state = doc["repos"][rid]
+            state["items"] += autoassess.claude_items(inp, answer, made_at)
+            state.update(summary=str(answer.get("summary") or ""), release=str(answer.get("release") or ""),
+                         unknowns=[str(x) for x in answer.get("unknowns") or []], updated_at=made_at)
+            cost = result.get("total_cost_usd")
+            if isinstance(cost, (int, float)):
+                state["cost_usd"] = float(state.get("cost_usd") or 0) + cost
+                total += cost
+            touched.add(rid)
+    if touched or run:
+        autoassess.save(data, doc)
+    for rid in sorted(touched):
+        path = data / "assess" / f"{names[rid]}.new.html"
+        htmlreport.write_text(path, autoassess.render(rid, doc["repos"][rid], f"{names[rid]}.html"))
+        print(f"書きました: {path}")
+    if rest:
+        print(f"上限（auto_assess_max_repos = {limit}）を超えた {len(rest)} リポジトリは次の回に回します: {', '.join(q[1] for q in rest)}")
+    if not touched and not rest and code == EXIT_OK:
+        print("診断の後に増えた脆弱性はありません")
+    print(f"料金の目安: ${total:.2f}")
+    return code
 
 
 def _cmd_status(args, cfg: dict) -> int:

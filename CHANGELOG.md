@@ -2,6 +2,21 @@
 
 <!-- 見出しは `## <版番号>` の形にする。まだ出していない変更は「## 未公開」に書き、リリースのときに版番号へ書き換える -->
 
+## 未公開
+
+上げるときに気を付けること:
+
+- 設定に `auto_assess`（既定 `false`）と `auto_assess_max_repos`（既定 3）が増えた。切ったままなら、これまでと何も変わらない
+
+変更:
+
+- `assess --new`: 一度 `assess` したリポジトリに後から増えた脆弱性だけを Claude Code に調べさせる（design.md §7.4）。
+  github.com の公開のリポジトリだけで、設定 `auto_assess` を入れたときだけ動く。前回の判断で build / dev / unused だったパッケージは、
+  KEV・悪意あるコードでなければ Claude に聞かずにその判断を使う。結果は `<data>/assess/new.json` と `<data>/assess/<名前>.new.html`
+- `assess --id <id> --last` の `changed` は、自動で調べた分も調べたものに含めて比べる
+- `scripts/register-task.ps1 -Assess`: `assess --new` のタスク「LockWatch assess」（毎日 9:30、2 時間まで）を登録する
+- 画面の設定のタブに `auto_assess`・`auto_assess_max_repos`
+
 ## 0.6.0
 
 上げるときに気を付けること:

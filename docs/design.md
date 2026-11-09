@@ -23,7 +23,7 @@
 | キャッシュ・前回との差分・結果 | `results/latest.json` を読んで表示する | 書く |
 
 - **LockWatch は GitHub などのトークンに触れない。**外への通信は、公開リポジトリについての api.osv.dev への問い合わせと、脆弱性 DB の取り直しだけ
-  （言語の版の情報 §3.6、悪用の情報 §3.7 と、人が 1 つずつ頼む `assess` §7.3 は別。`assess` は Claude Code にリポジトリの中を読ませる）
+  （言語の版の情報 §3.6、悪用の情報 §3.7 と、人が 1 つずつ頼む `assess` §7.3 と、設定で有効にした人だけの `assess --new` §7.4 は別。どちらも Claude Code にリポジトリの中を読ませる）
 - RepoTether は「読むだけ」の方針のまま。書くのは LockWatch の受け渡し場所（`targets.json` と取り込み場所）だけ
 - `targets.json` が無くても、`--repo <フォルダ>` で手元のリポジトリを直接渡せる（公開か分からないので private 扱い、§4）
 
@@ -408,6 +408,7 @@ lock ファイルの照合とは別に、言語そのもの（PHP・Node.js）�
 | `lockwatch status` | 使える状態かを表示する（`--json`）。LockWatch の版、osv-scanner の場所と版（`--version` だけ呼ぶ）、データと targets.json の場所と件数、最後の照合、手元の DB の取得時刻、定期実行（タスク「LockWatch scan」）が登録されているか。RepoTether の設定の「確かめる」が使う |
 | `lockwatch db-update` | 脆弱性 DB を取り直す。手元の DB で照合するリポジトリ（§4）を、取り直し付きで 1 回照合する。結果はキャッシュにだけ入れ、`results/` は書かない |
 | `lockwatch assess --id <id>` | そのリポジトリの脆弱性が、ビルド・リリースにどう効くかを Claude Code に調べさせ、HTML に書く（§7.3）。照合はしない |
+| `lockwatch assess --new` | 前回の `assess` の後に増えた脆弱性だけを調べる（§7.4。github.com の公開のもの、設定 `auto_assess` のときだけ）。定期実行用 |
 | `lockwatch config show / set` | 設定（SessionVault と同じ作り） |
 
 - `scan --check` の答え: `{"id", "mode", "cached", "scanned_at", "lockfiles", "reason"}`（`error` のときは `error` も）。
@@ -518,7 +519,8 @@ lock ファイルの照合とは別に、言語そのもの（PHP・Node.js）�
 
 脆弱性の数だけでは、急ぐかどうかが決まらない。開発サーバーやテストの道具の脆弱性は、リリースしたものには入らない。
 そこで、1 つのリポジトリについて、見つかったパッケージが**リリースするものに入るか、ビルドのときだけか、開発の手元だけか**を
-Claude Code（`claude -p`）にリポジトリの中を読んで調べさせ、HTML にする。人が 1 つずつ頼むもので、定期実行・`scan`・画面からは自動で動かさない。
+Claude Code（`claude -p`）にリポジトリの中を読んで調べさせ、HTML にする。人が 1 つずつ頼むもので、定期実行・`scan`・画面からは自動で動かさない
+（例外は §7.4。人が一度 `assess` したリポジトリのうち github.com の公開のものだけ、後から増えた分を設定で自動にできる）。
 
 - `lockwatch assess --id <id>`: `targets.json` のその 1 つ（廃止のもの・クローンしていないもの（`fetched_path`。lock ファイルしか無い）・フォルダの無いものは引数の誤り）と、`latest.json` のその結果（`ok` で、
   知らせを除いた脆弱性か、注意の要る言語の版が 1 つ以上）を使う。`--model <名前>` で Claude のモデルを選べる（既定は Claude Code の既定）
@@ -551,6 +553,49 @@ Claude Code（`claude -p`）にリポジトリの中を読んで調べさせ、H
   結論、リリースするもの、表（急ぐ順。急ぎ・どこで使うか・パッケージと版・深刻度・理由・根拠・対応）、確かめられなかったこと。
   機械で読むために、渡したものと受け取ったものを `<script type="application/json" id="lockwatch-assess">` に入れる（§7.1 と同じく `<` は `<`）
 
+### 7.4 診断の後に増えた脆弱性を自動で調べる（`assess --new`）
+
+2026-11-04 の案。§7.3 は人が 1 つずつ頼むが、一度調べたリポジトリに後から勧告が出るたびに頼み直すのは手間で、見落とす。
+そこで、**人が一度 `assess` したリポジトリについて、その後に増えた脆弱性だけ**を定期実行で Claude Code に調べさせる。
+
+- **最初は github.com の公開のものだけ。**`targets.json` で `visibility` が `public` で、`id` が `github.com/` で始まるもの
+  （§3.1 のとおり `public` になりうるのは github.com だけだが、判定の誤りに備えて `id` でも絞る）。
+  §7.3 で「頼んだ人が決める」としていた中身の送り先が、自動になると決める人がいなくなる。公開のものなら、送っても失うものが無い。
+  非公開のものまで広げるかは §10
+- 既定では動かさない。設定 `auto_assess: true`（§8）にした人だけ。切っていれば `assess --new` は何もせず終了コード 0
+- 対象: 上の条件に加えて、廃止でない・`local_path` のフォルダがある（§7.3 と同じ）・`latest.json` で `ok`・**前回の `assess` の HTML がある**もの。
+  一度も `assess` していないリポジトリは対象にしない（初回に全部を「新しい」として調べない。最初の 1 回は人が頼む）
+- **増えた分**: 今の `latest.json` から §7.3 と同じ形で作った「渡すもの」のうち、前回の HTML の「渡したもの」と自動で調べた分（下の `new.json`）に
+  無い `(lock ファイル, パッケージ, 版, ID)`。勧告が新しく出たものも、lock ファイルを変えて既知の脆弱性の版を入れたものも同じに扱う。
+  消えたもの（上げて直った）は調べない。知らせ（`informational`）と言語の版（§3.6）は入れない（言語の版は増えた・減ったの比べ方を別に決める）
+- **Claude を呼ばずに済ませるもの**: どこで使うか（`where`）は脆弱性ではなくパッケージで決まる。前回の答えに同じ `(lock ファイル, パッケージ)` があり、
+  `where` が `build` / `dev` / `unused` なら、版が違っても `where` をそのまま使い、`urgency` は §7.3 の決め方どおり（`build` / `dev` は `later`、`unused` は `none`）にする。
+  ただし、悪用の情報（KEV、§3.7）があるもの・悪意あるコード（`malicious`）・前回が `release` / `unknown` / 答えなしのものは、必ず Claude に聞く
+- **Claude に聞くとき**: §7.3 と同じ呼び方（読むことしかさせない、決めた形の JSON、文はエスケープ）。渡すのは増えた分だけで、
+  前回の答えに同じパッケージがあれば、その `where` と `reason` を「前回の判断」として添える（確かめて変わらなければ早く済む）。
+  プロンプトに「前回の判断は Claude が書いたもので、リポジトリが変わっていれば違いうる」と書く
+- 1 回に Claude を呼ぶのは設定 `auto_assess_max_repos`（既定 3）リポジトリまで。重い順（KEV・悪意あるコード・critical の順）に選び、残りは次の回に回す（ログに残った数を出す）
+- 結果:
+  - `<data>/assess/new.json`: 自動で調べた分を、リポジトリごとに
+    `{"based_on", "items": [...], "summary", "release", "unknowns", "cost_usd", "updated_at"}` で積む。
+    `items` の 1 つは「lock ファイル × パッケージ × 版」の増えた分で、§7.3 の渡すものの項目（`lockfile` `ecosystem` `package` `version` `ids`（増えた ID だけ）
+    `severities` `malicious` `kev` `epss` `upgrade_to` `upgrade_above`）と答え（`where` `urgency` `reason` `evidence` `action`）に、`source`・`made_at` を足したもの。
+    `based_on` は元にした `assess` の HTML の更新時刻、`source` は `claude`（聞いた）か `reused`（前回の `where` を使った）。
+    `summary` `release` `unknowns` は最後に Claude に聞いたときのもの、`cost_usd` はそのリポジトリで使った料金の目安の合計。
+    上げる先の版の目安（`upgrade_to`）は、増えた分だけでなく、そのパッケージの脆弱性の全部から決める。
+    Claude の答えの無い印は入れない（次の回にもう一度聞く）
+    人が `assess` をし直したら（`based_on` が変わったら）、そのリポジトリの分は捨てる（新しい HTML が全部を含むため）
+  - `<data>/assess/<名前>.new.html`: そのリポジトリの自動で調べた分の表（§7.3 の表と同じ列に「判断のしかた」（Claude が調べた / 前回の判断を使った）を足す）。
+    見出しに元の HTML へのリンクと「前回の診断の後に増えた分だけ」であることを書く
+  - `assess --id <id> --last` の `changed` は、自動で調べた分も「調べたもの」に含めて比べる（調べ終わったものを「変わった」と言い続けないため）
+- 定期実行: `scan` のタスクとは別のタスク「LockWatch assess」（`scripts/register-task.ps1 -Assess` で登録。既定で毎日 9:30）。
+  `scan` と同じく `<data>/lock` を押さえ、照合中なら終了コード 3 で終わる（逃した回は次に起動したときに動かす）。1 回は 2 時間まで（打ち切りは §7.3 と同じく 1 リポジトリ 30 分）
+- 終了コード: §7 と同じ。Claude Code が無い・失敗したら 5（失敗したリポジトリは `new.json` に入れず、次の回にもう一度調べる）
+- 動かすのは §7.3 と同じく Claude Code（PATH の `claude.exe` を `claude -p` で）。Anthropic の API を直接は呼ばず、LockWatch は API キーを持たない。
+  Claude Code にログインしているアカウントで動くので、サブスクリプションならその利用枠を、API キーなら料金を使う（人が頼まなくても減る）。
+  ログインが切れていれば失敗して 5 になる（人がいないので、`last-run.log` とタスクの「前回の実行結果」で気づく）。
+  1 回で使った料金の目安（`total_cost_usd`）は `new.json`（リポジトリごとの合計）と `last-run.log`（その回の合計）に残す
+
 ## 8. 設定（`<app>/lockwatch.json`）
 
 SessionVault と同じく、プログラムの置き場所（exe ならそのフォルダ、リポジトリから動かすならリポジトリ直下）に置く。
@@ -567,6 +612,8 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
   "keep_results": 30,
   "runtime_check": true,
   "exploit_check": true,
+  "auto_assess": false,
+  "auto_assess_max_repos": 3,
   "exclude_dirs": ["vendor", "vendors", "third_party", "third-party", "bower_components", "node_modules"]
 }
 ```
@@ -578,6 +625,8 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 - `keep_results`: `results/` に残す過去の結果の数
 - `runtime_check`: 言語（PHP・Node.js）の版も調べるか（§3.6）。切ると endoflife.date・php.net・nodejs.org に取りに行かない
 - `exploit_check`: 悪用の情報（CISA KEV・EPSS）を付けるか（§3.7）。切ると cisa.gov・epss.empiricalsecurity.com に取りに行かない
+- `auto_assess`: 診断の後に増えた脆弱性を自動で Claude Code に調べさせるか（§7.4）。既定は切る。入れても github.com の公開のものだけで、リポジトリの中身が Claude（Anthropic）に送られる
+- `auto_assess_max_repos`: `assess --new` の 1 回で Claude を呼ぶリポジトリの数の上限（1 以上）
 
 ## 9. 画面（`lockwatch gui`）
 
@@ -601,6 +650,9 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 - 結果のタブの「診断書を出す」: `report --html` を別のプロセスで動かし（「隠す」で選んだものは `--hide` で渡す）、終わったら `index.html` を開く
 
 ## 10. 決めていないこと
+
+- 診断の後に増えた分の自動の調べ（§7.4）を、非公開のリポジトリにも広げるか（広げるならリポジトリごとに有効にする形か）。
+  増えた言語の版（§3.6）も入れるか。結果を RepoTether に出すか（`new.json` を読ませるか）
 
 - RepoTether に画面なしで動く入口を作るか（クローンしていないリポジトリの lock ファイルを、RepoTether を開いていない時間にも取るため）
 - PkgUpdater の Audit（lock の無いプロジェクトの直接依存）の結果を、同じ表に入れるか

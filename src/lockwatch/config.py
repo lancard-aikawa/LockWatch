@@ -15,6 +15,8 @@ DEFAULTS: dict = {
     "exclude_dirs": ["vendor", "vendors", "third_party", "third-party", "bower_components", "node_modules"],
     "runtime_check": True,
     "exploit_check": True,
+    "auto_assess": False,
+    "auto_assess_max_repos": 3,
 }
 
 
@@ -55,6 +57,8 @@ _PARSERS = {
     "exclude_dirs": _parse_names,
     "runtime_check": _parse_bool,
     "exploit_check": _parse_bool,
+    "auto_assess": _parse_bool,
+    "auto_assess_max_repos": _parse_positive_int,
 }
 
 

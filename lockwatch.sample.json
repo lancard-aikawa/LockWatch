@@ -9,5 +9,7 @@
   "keep_results": 30,
   "runtime_check": true,
   "exploit_check": true,
+  "auto_assess": false,
+  "auto_assess_max_repos": 3,
   "exclude_dirs": ["vendor", "vendors", "third_party", "third-party", "bower_components", "node_modules"]
 }
