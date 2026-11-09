@@ -175,6 +175,7 @@ def status_lines(s: dict) -> list[tuple[str, str]]:
          else "まだありません"),
         ("手元の脆弱性 DB", ", ".join(f"{k} {v}" for k, v in s["db"].items()) or "まだ取っていません"),
         ("定期実行", {True: f"登録済み (タスク「{s['task']['name']}」)", False: "未登録"}.get(task, "分かりません")),
+        ("自動の判断", statusmod.auto_assess_text(s["auto_assess"])),
     ]
 
 

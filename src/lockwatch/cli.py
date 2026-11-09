@@ -634,6 +634,7 @@ def _cmd_assess(args, cfg: dict) -> int:
     name = htmlreport.file_names(latest["repos"])[args.id]
     path = data / "assess" / f"{name}.html"
     htmlreport.write_text(path, assess.render(args.id, inp, result, model=args.model, made_at=store.now()))
+    autoassess.discard(data, args.id, data / "assess" / f"{name}.new.html")  # 新しい HTML が全部を含む（design.md §7.4）
     print(f"書きました: {path}")
     return EXIT_OK
 
@@ -645,19 +646,25 @@ def _assess_last(args, data: Path) -> int:
     if latest is None or args.id not in latest["repos"]:
         print(f"結果にありません: {args.id}", file=sys.stderr)
         return EXIT_USAGE
-    path = data / "assess" / f"{htmlreport.file_names(latest['repos'])[args.id]}.html"
+    name = htmlreport.file_names(latest["repos"])[args.id]
+    path = data / "assess" / f"{name}.html"
     made = store.iso(datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)) if path.is_file() else None
-    changed = None
+    changed = added = removed = new_html = None
     entry = latest["repos"][args.id]
     block = assess.read_block(path) if made else None
-    if block is not None and entry.get("status") == "ok":
+    if block is not None:
         # 自動で調べた分（design.md §7.4）も、調べたものに含めて比べる
         state = autoassess.load(data)["repos"].get(args.id)
         if state and state.get("based_on") != autoassess.based_on(path):
             state = None
-        prev = autoassess.merged_input(block, state)
-        changed = assess.fingerprint(prev) != assess.fingerprint(assess.build_input(args.id, entry, Path(".")))
-    print(json.dumps({"path": str(path), "exists": made is not None, "made_at": made, "changed": changed}, ensure_ascii=False))
+        np = data / "assess" / f"{name}.new.html"
+        new_html = str(np) if state and state.get("items") and np.is_file() else None
+        if entry.get("status") == "ok":
+            current = assess.build_input(args.id, entry, Path("."))
+            changed = assess.fingerprint(autoassess.merged_input(block, state)) != assess.fingerprint(current)
+            added, removed = autoassess.counts(block, state, current)
+    print(json.dumps({"path": str(path), "exists": made is not None, "made_at": made, "changed": changed,
+                      "added": added, "removed": removed, "new_html": new_html}, ensure_ascii=False))
     return EXIT_OK
 
 

@@ -405,7 +405,7 @@ lock ファイルの照合とは別に、言語そのもの（PHP・Node.js）�
 | `lockwatch report` | `latest.json` を表にして表示（`--new` で新しいものだけ、`--json`。`--hide <種類>` を重ねて消す: `unmaintained` などの `informational` の値か、`low` などの `severity` の値。`--id <id>` でそのリポジトリだけ） |
 | `lockwatch report --html` | リポジトリごとの診断書（HTML）を書く（§7.1） |
 | `lockwatch packages [<名前>]` | 全依存の台帳（§3.4）を引く。照合はしない |
-| `lockwatch status` | 使える状態かを表示する（`--json`）。LockWatch の版、osv-scanner の場所と版（`--version` だけ呼ぶ）、データと targets.json の場所と件数、最後の照合、手元の DB の取得時刻、定期実行（タスク「LockWatch scan」）が登録されているか。RepoTether の設定の「確かめる」が使う |
+| `lockwatch status` | 使える状態かを表示する（`--json`）。LockWatch の版、osv-scanner の場所と版（`--version` だけ呼ぶ）、データと targets.json の場所と件数、最後の照合、手元の DB の取得時刻、定期実行（タスク「LockWatch scan」）が登録されているか、自動の判断（§7.4）の設定と、タスク「LockWatch assess」が登録されているか。RepoTether の設定の「確かめる」が使う |
 | `lockwatch db-update` | 脆弱性 DB を取り直す。手元の DB で照合するリポジトリ（§4）を、取り直し付きで 1 回照合する。結果はキャッシュにだけ入れ、`results/` は書かない |
 | `lockwatch assess --id <id>` | そのリポジトリの脆弱性が、ビルド・リリースにどう効くかを Claude Code に調べさせ、HTML に書く（§7.3）。照合はしない |
 | `lockwatch assess --new` | 前回の `assess` の後に増えた脆弱性だけを調べる（§7.4。github.com の公開のもの、設定 `auto_assess` のときだけ）。定期実行用 |
@@ -437,7 +437,7 @@ lock ファイルの照合とは別に、言語そのもの（PHP・Node.js）�
   ファイルがあるだけでは実行中としない（落ちたあとに残ったファイルで止まらないように）
 - 終了コード: 0 = 終わった（脆弱性の有無は問わない）、1 = 想定外の失敗（LockWatch の誤り。`--log` なら例外の内容を書く）、2 = 引数の誤り、3 = 実行中、4 = osv-scanner が無い・失敗した、5 = Claude Code が無い・失敗した（`assess` だけ）
   （1 回でも失敗したら 4。結果はそれでも書き、失敗したリポジトリは `error` にする。フォルダが無いだけの `error` は 0）
-- 定期実行はタスクスケジューラで 1 日 1 回（`scripts/register-task.ps1`。SessionVault と同じ作り）
+- 定期実行はタスクスケジューラで 1 日 1 回（`scripts/register-task.ps1`。SessionVault と同じ作り）。同じスクリプトが §7.4 のタスク「LockWatch assess」も一緒に登録する
   - `<home>\pythonw.exe scripts\lockwatch-launch.py --log scan` を、既定で毎日 9:00 に（`<home>\pythonw.exe` は `scripts\find-pythonw.ps1` が探す Python 3.11 以上の本体の `pythonw.exe`。順に `.venv\pyvenv.cfg` の `home`、`uv python find`、`py`、PATH の `python`。venv の中のものは `sys.base_prefix` の本体に置き換える。`.venv` が無くても動く。
     uv 0.11 の `.venv\Scripts\pythonw.exe` はコンソール用で黒い窓が開くため、使わない。`lockwatch-launch.py` が `src` を読み込み先に足す）。止まっていて逃した回は、次に起動したときに動かす
   - 窓を出さない（`pythonw`、osv-scanner は `CREATE_NO_WINDOW`）。優先度は 7（通常より低い。子の osv-scanner も引き継ぐ）
@@ -524,9 +524,12 @@ Claude Code（`claude -p`）にリポジトリの中を読んで調べさせ、H
 
 - `lockwatch assess --id <id>`: `targets.json` のその 1 つ（廃止のもの・クローンしていないもの（`fetched_path`。lock ファイルしか無い）・フォルダの無いものは引数の誤り）と、`latest.json` のその結果（`ok` で、
   知らせを除いた脆弱性か、注意の要る言語の版が 1 つ以上）を使う。`--model <名前>` で Claude のモデルを選べる（既定は Claude Code の既定）
-- `assess --id <id> --last`: 調べずに、前回書いた HTML を `{"path", "exists", "made_at", "changed"}` の JSON で答える（RepoTether の「前回の結果を開く」用。`made_at` はファイルの更新時刻）。
+- `assess --id <id> --last`: 調べずに、前回書いた HTML を `{"path", "exists", "made_at", "changed", "added", "removed", "new_html"}` の JSON で答える（RepoTether の「前回の結果を開く」用。`made_at` はファイルの更新時刻）。
   `changed` は、HTML に入れた「渡したもの」と今の `latest.json` から作ったものの中身（lock ファイル・パッケージ・版・ID、言語の版・状態・修正版）が違うか。
   照合の時刻が変わっただけなら `false`（定期実行のたびに古いと言わないため）。比べられなければ `null`
+  - `added` / `removed`: 脆弱性の (lock ファイル, パッケージ, 版, ID) が、調べたあとにいくつ増えたか・消えたか（言語の版は数えない）。比べられなければ `null`。
+    急ぐかどうかに効くのは `added` だけ（上げて直って消えただけなら、調べ直さなくてよい）。表示する側は「調べ直す」を勧めるのを `added` が 1 以上のときにする
+  - `new_html`: 自動で調べた分（§7.4）の HTML の場所。無ければ `null`
 - 書く場所: `<data>/assess/<名前>.html`（`<名前>` は §7.1 と同じ）。`<data>/assess` は Claude Code を動かすフォルダも兼ねる
   （対象のリポジトリに何も書かない。Claude Code のセッションの記録も、そのリポジトリの履歴に混ざらない）
 - **Claude には読むことしかさせない**:
@@ -583,12 +586,19 @@ Claude Code（`claude -p`）にリポジトリの中を読んで調べさせ、H
     `based_on` は元にした `assess` の HTML の更新時刻、`source` は `claude`（聞いた）か `reused`（前回の `where` を使った）。
     `summary` `release` `unknowns` は最後に Claude に聞いたときのもの、`cost_usd` はそのリポジトリで使った料金の目安の合計。
     上げる先の版の目安（`upgrade_to`）は、増えた分だけでなく、そのパッケージの脆弱性の全部から決める。
-    Claude の答えの無い印は入れない（次の回にもう一度聞く）
-    人が `assess` をし直したら（`based_on` が変わったら）、そのリポジトリの分は捨てる（新しい HTML が全部を含むため）
+    Claude の答えの無い印は入れない（次の回にもう一度聞く）。何も調べていないリポジトリ（増えた分が無かったもの）は書かない。
+    人が `assess --id` をし直したら、その場でそのリポジトリの分と `.new.html` を消す（新しい HTML が全部を含むため。
+    RepoTether が元の HTML の時刻と突き合わせずに `new.json` をそのまま読めるように）。
+    ほかの手で HTML が書き換わったとき（`based_on` が違うとき）も、`assess --new` と `--last` は古い分として使わない
+  - RepoTether は `new.json` を `latest.json` と同じく直接読み、新しく出た脆弱性の札の隣に判断（急ぎ・どこで使うか）を出す
+    （リポジトリごとに CLI を呼ぶより軽い）。`items` の (lock ファイル, パッケージ, 版, `ids`) で `latest.json` の findings と突き合わせる
   - `<data>/assess/<名前>.new.html`: そのリポジトリの自動で調べた分の表（§7.3 の表と同じ列に「判断のしかた」（Claude が調べた / 前回の判断を使った）を足す）。
     見出しに元の HTML へのリンクと「前回の診断の後に増えた分だけ」であることを書く
-  - `assess --id <id> --last` の `changed` は、自動で調べた分も「調べたもの」に含めて比べる（調べ終わったものを「変わった」と言い続けないため）
-- 定期実行: `scan` のタスクとは別のタスク「LockWatch assess」（`scripts/register-task.ps1 -Assess` で登録。既定で毎日 9:30）。
+  - `assess --id <id> --last` の `changed`・`added`・`removed`（§7.3）は、自動で調べた分も「調べたもの」に含めて比べる（調べ終わったものを「変わった」と言い続けないため）。
+    `new_html` は自動で調べた分の HTML（無ければ `null`）
+- 定期実行: `scan` のタスクとは別のタスク「LockWatch assess」（既定で毎日 9:30）。`scripts/register-task.ps1` が「LockWatch scan」と一緒に必ず登録する
+  （`-Unregister` も 2 つとも消す）。**オンオフは設定 `auto_assess` だけで決める**（切っていれば何もせずに終わるので、タスクは登録しておくだけでよい。
+  設定とタスクの 2 つを入れないと動かない作りにすると、片方を忘れる）。RepoTether は切り替えを持たず、`status` の答えで入か切かを出すだけ（RepoTether は読むだけの方針、§2）。
   `scan` と同じく `<data>/lock` を押さえ、照合中なら終了コード 3 で終わる（逃した回は次に起動したときに動かす）。1 回は 2 時間まで（打ち切りは §7.3 と同じく 1 リポジトリ 30 分）
 - 終了コード: §7 と同じ。Claude Code が無い・失敗したら 5（失敗したリポジトリは `new.json` に入れず、次の回にもう一度調べる）
 - 動かすのは §7.3 と同じく Claude Code（PATH の `claude.exe` を `claude -p` で）。Anthropic の API を直接は呼ばず、LockWatch は API キーを持たない。
@@ -639,7 +649,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 
 | タブ | 中身 |
 |---|---|
-| 状態 | `status` の内容。ボタン: 全体を照合（`scan`）・DB を取り直す（`db-update`）・定期実行を登録 / 解除（`scripts/register-task.ps1`）・前回のログを開く（`last-run.log`）。動かした仕事の出力を下に出す |
+| 状態 | `status` の内容（自動の判断 §7.4 の入・切も）。ボタン: 全体を照合（`scan`）・DB を取り直す（`db-update`）・定期実行を登録 / 解除（`scripts/register-task.ps1`）・前回のログを開く（`last-run.log`）。動かした仕事の出力を下に出す |
 | 結果 | `latest.json` の一覧（リポジトリ・パッケージ・版・深刻度・ID・直る版・知らせの種類・lock ファイル・悪用（§3.7））。重い順（同じ深刻度なら KEV、EPSS の高い順）。悪意あるコード（`malicious`）は知らせの列に「悪意あるコード」と出す。「隠す」（深刻度・知らせの種類）、「新しく出たものだけ」、文字で絞り込み。行をダブルクリックすると `https://osv.dev/vulnerability/<id>` を開く |
 | 台帳 | 全依存の台帳（`packages.json`、§3.4）を引く。名前と版を入れると、使っているところを「パッケージ・版・生態系・リポジトリ・lock ファイル」で出す。名前は大文字小文字を区別しない部分一致（`*` `?` を書いたときは、`lockwatch packages` と同じく全体の一致）。版は文字どおりの一致。名前も版も空なら何も出さない（全件は多すぎる）。出すのは先頭 2,000 行までで、件数は全部を数える。照合はしない |
 | 注意 | `latest.json` の注意（§3.5）の一覧（リポジトリ・種類・パッケージ・版・詳細・lock ファイル）。種類ごとに「隠す」、「新しく出たものだけ」、文字で絞り込み |
@@ -652,7 +662,7 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 ## 10. 決めていないこと
 
 - 診断の後に増えた分の自動の調べ（§7.4）を、非公開のリポジトリにも広げるか（広げるならリポジトリごとに有効にする形か）。
-  増えた言語の版（§3.6）も入れるか。結果を RepoTether に出すか（`new.json` を読ませるか）
+  増えた言語の版（§3.6）も入れるか
 
 - RepoTether に画面なしで動く入口を作るか（クローンしていないリポジトリの lock ファイルを、RepoTether を開いていない時間にも取るため）
 - PkgUpdater の Audit（lock の無いプロジェクトの直接依存）の結果を、同じ表に入れるか

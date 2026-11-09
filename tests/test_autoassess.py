@@ -50,6 +50,17 @@ class EligibleTest(unittest.TestCase):
             self.assertFalse(autoassess.eligible(Target(GH, "public", root / "nope", False)))
 
 
+class StatusTextTest(unittest.TestCase):
+    def test_on_without_task_says_it_does_not_run(self):
+        from lockwatch.status import auto_assess_text
+        task = {"name": "LockWatch assess", "registered": False}
+        self.assertIn("切", auto_assess_text({"enabled": False, "max_repos": 3, "task": task}))
+        on = auto_assess_text({"enabled": True, "max_repos": 3, "task": task})
+        self.assertIn("入", on)
+        self.assertIn("動かない", on)  # 設定だけ入れてタスクが無いと動かない
+        self.assertIn("登録済み", auto_assess_text({"enabled": True, "max_repos": 3, "task": {**task, "registered": True}}))
+
+
 class CliNewTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -221,6 +232,31 @@ class CliNewTest(unittest.TestCase):
         self.run_new([])
         items = self.new_doc()["repos"][GH]["items"]
         self.assertEqual(sorted(i for it in items for i in it["ids"]), ["GHSA-10", "GHSA-9"])
+
+    def test_last_counts_and_new_html(self):
+        got = json.loads(self.run_cli(["assess", "--id", GH, "--last"])[1])
+        self.assertEqual((got["changed"], got["added"], got["removed"], got["new_html"]), (False, 0, 0, None))
+        # 1 つ増えて、1 つ消えた（express を上げた）
+        latest = json.loads((self.data / "results" / "latest.json").read_text(encoding="utf-8"))
+        latest["repos"][GH] = entry([BASE_FINDINGS[0], finding("lodash", "4.0.0", "GHSA-7")])
+        self.write_latest(latest["repos"])
+        got = json.loads(self.run_cli(["assess", "--id", GH, "--last"])[1])
+        self.assertEqual((got["changed"], got["added"], got["removed"], got["new_html"]), (True, 1, 1, None))
+        # 増えた分を自動で調べると、増えたものは 0 になり、自動の分の HTML を答える。消えた分は残る
+        self.run_new([claude_result([answer("p1", "dev", "later")])])
+        got = json.loads(self.run_cli(["assess", "--id", GH, "--last"])[1])
+        self.assertEqual((got["changed"], got["added"], got["removed"]), (True, 0, 1))
+        self.assertEqual(Path(got["new_html"]), self.data / "assess" / "github.com_me_app.new.html")
+
+    def test_assess_again_discards_auto_part(self):
+        self.grow([finding("lodash", "4.0.0", "GHSA-7")])
+        self.run_new([claude_result([answer("p1", "dev", "later")])])
+        new_html = self.data / "assess" / "github.com_me_app.new.html"
+        self.assertTrue(new_html.is_file())
+        # 人が assess をし直すと、その場で自動の分を消す（RepoTether が new.json をそのまま読めるように）
+        self.assess_once(GH, [answer("p1", "dev", "later"), answer("p2", "release", "now"), answer("p3", "dev", "later")])
+        self.assertFalse(new_html.exists())
+        self.assertNotIn(GH, self.new_doc()["repos"])
 
     def test_busy(self):
         with store.exclusive(self.data):

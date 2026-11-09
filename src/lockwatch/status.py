@@ -10,6 +10,7 @@ from . import __version__, osv, store
 from .targets import TargetsError, load as load_targets
 
 TASK_NAME = "LockWatch scan"
+ASSESS_TASK_NAME = "LockWatch assess"  # assess --new（design.md §7.4）
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -49,6 +50,9 @@ def collect(cfg: dict, data: Path, targets_path: Path) -> dict:
     }
     out["db"] = store.load_db_state(data)
     out["task"] = {"name": TASK_NAME, "registered": task_registered()}
+    # 自動の判断（design.md §7.4）。スイッチは設定の auto_assess だけで、タスクは登録しておくだけでよい
+    out["auto_assess"] = {"enabled": bool(cfg.get("auto_assess")), "max_repos": cfg.get("auto_assess_max_repos"),
+                          "task": {"name": ASSESS_TASK_NAME, "registered": task_registered(ASSESS_TASK_NAME)}}
     return out
 
 
@@ -57,6 +61,7 @@ def lines(s: dict) -> list[str]:
     o = s["osv_scanner"]
     task = s["task"]["registered"]
     latest = s["latest"]
+    aa = s["auto_assess"]
     return [
         f"LockWatch      {s['lockwatch']}",
         f"osv-scanner    {o['version']}（{o['path']}）" if o["version"] else f"osv-scanner    使えません: {o['error']}",
@@ -65,4 +70,14 @@ def lines(s: dict) -> list[str]:
         f"最後の照合      {latest['scanned_at']}（{latest['repos']} 件、エラー {latest['errors']}）" if latest else "最後の照合      まだありません",
         "手元の DB       " + (", ".join(f"{k} {v}" for k, v in s["db"].items()) or "まだ取っていません"),
         f"定期実行        {'登録済み' if task else '未登録（scripts/register-task.ps1）' if task is False else '-'}（{s['task']['name']}）",
+        f"自動の判断      {auto_assess_text(aa)}",
     ]
+
+
+def auto_assess_text(aa: dict) -> str:
+    """自動の判断（design.md §7.4）の状態。有効でもタスクが無ければ動かないので、そう書く"""
+    if not aa["enabled"]:
+        return "切（lockwatch config set auto_assess true で有効にする）"
+    reg = aa["task"]["registered"]
+    task = {True: f"タスク「{aa['task']['name']}」登録済み", False: f"タスク「{aa['task']['name']}」未登録のため動かない（scripts/register-task.ps1）"}.get(reg, "タスクは分かりません")
+    return f"入（github.com の公開のものだけ、1 回 {aa['max_repos']} リポジトリまで。{task}）"

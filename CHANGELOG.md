@@ -13,8 +13,12 @@
 - `assess --new`: 一度 `assess` したリポジトリに後から増えた脆弱性だけを Claude Code に調べさせる（design.md §7.4）。
   github.com の公開のリポジトリだけで、設定 `auto_assess` を入れたときだけ動く。前回の判断で build / dev / unused だったパッケージは、
   KEV・悪意あるコードでなければ Claude に聞かずにその判断を使う。結果は `<data>/assess/new.json` と `<data>/assess/<名前>.new.html`
-- `assess --id <id> --last` の `changed` は、自動で調べた分も調べたものに含めて比べる
-- `scripts/register-task.ps1 -Assess`: `assess --new` のタスク「LockWatch assess」（毎日 9:30、2 時間まで）を登録する
+- `assess --id <id> --last`: 自動で調べた分も調べたものに含めて比べる。`added`（増えた脆弱性の数）・`removed`（消えた数）・`new_html`（自動の分の HTML）を足した。
+  上げて直って消えただけのものは `added` が 0 になるので、表示する側は `added` で「調べ直す」を勧められる
+- `assess --id` で調べ直すと、そのリポジトリの自動の分（`new.json` の分と `.new.html`）をその場で消す
+- `scripts/register-task.ps1` が、「LockWatch scan」と一緒に `assess --new` のタスク「LockWatch assess」（毎日 9:30、2 時間まで。`-AssessAt` で時刻を変える）も登録する。
+  `-Unregister` は 2 つとも消す。オンオフは設定 `auto_assess` だけで決まる
+- `status`: `auto_assess`（入か切か、1 回の上限、タスク「LockWatch assess」が登録されているか）。画面の状態のタブにも「自動の判断」の行
 - 画面の設定のタブに `auto_assess`・`auto_assess_max_repos`
 
 ## 0.6.0

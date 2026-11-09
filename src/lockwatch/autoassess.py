@@ -42,6 +42,21 @@ def save(data: Path, doc: dict) -> None:
     store.write_json(new_path(data), {**doc, "repos": repos})
 
 
+def discard(data: Path, rid: str, new_html: Path) -> None:
+    """人が assess をし直したときに、そのリポジトリの自動の分を消す（新しい HTML が全部を含むため）"""
+    doc = load(data)
+    if doc["repos"].pop(rid, None) is not None:
+        save(data, doc)
+    new_html.unlink(missing_ok=True)
+
+
+def counts(block: dict, state: dict | None, current: dict) -> tuple[int, int]:
+    """(増えた, 消えた) 脆弱性の数。調べたもの（前回の HTML と自動の分）と、今の結果の (lock ファイル, パッケージ, 版, ID) を比べる"""
+    done = known(block, state)
+    now = _keys(current.get("packages") or [])
+    return len(now - done), len(done - now)
+
+
 def based_on(html: Path) -> str:
     """元にした assess の HTML の更新時刻。人が assess をし直すと変わる"""
     return store.iso(datetime.fromtimestamp(html.stat().st_mtime).astimezone())

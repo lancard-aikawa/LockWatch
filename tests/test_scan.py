@@ -399,6 +399,7 @@ class ScanTest(unittest.TestCase):
         self.assertIsNone(s["latest"])
         self.assertEqual(s["db"], {})
         self.assertEqual(s["task"], {"name": "LockWatch scan", "registered": False})
+        self.assertEqual(s["auto_assess"], {"enabled": False, "max_repos": 3, "task": {"name": "LockWatch assess", "registered": False}})
         self.run_cli("scan")
         s = self.status()
         self.assertEqual(s["latest"]["repos"], 5)

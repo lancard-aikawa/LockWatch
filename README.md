@@ -99,7 +99,7 @@ uv run lockwatch config show
   急ぐのはリリースに入るものだけ。Claude には読むことだけさせ（Read・Grep・Glob。コマンドの実行・書き込み・Web は無し）、リポジトリには何も書かない。
   **非公開のリポジトリの中身も Claude（Anthropic）に送る**ので、頼んだときだけ動く（定期実行では動かない）。RepoTether の「Claude に影響を調べさせる」からも呼ぶ（[docs/design.md](docs/design.md) §7.3）
 - `assess --new` は、一度 `assess` したリポジトリに**後から増えた脆弱性だけ**を、定期実行で Claude Code に調べさせる。既定では動かない
-  （`uv run lockwatch config set auto_assess true` で有効にし、`register-task.ps1 -Assess` でタスクを登録する）。
+  （`uv run lockwatch config set auto_assess true` か、画面の設定のタブで有効にする。タスク「LockWatch assess」は `register-task.ps1` が「LockWatch scan」と一緒に登録する）。
   対象は **github.com の公開のリポジトリだけ**。前回の判断で「ビルドのときだけ」「開発の手元だけ」「使っていない」だったパッケージは、
   KEV・悪意あるコードでなければ Claude に聞かずにその判断を使う。1 回に Claude を呼ぶのは `auto_assess_max_repos`（既定 3）リポジトリまで。
   Claude Code にログインしているアカウントの利用枠（API キーなら料金）を使う。結果は `data\assess\<名前>.new.html` と `data\assess\new.json`（[docs/design.md](docs/design.md) §7.4）
@@ -107,13 +107,13 @@ uv run lockwatch config show
 
 ## 定期実行
 
-タスクスケジューラに毎日 1 回の scan を登録する。本体の Python の `pythonw.exe` と `scripts\lockwatch-launch.py` で動くので窓は開かない。`scripts\find-pythonw.ps1` が Python 3.11 以上を探す（`.venv` の `home`、`uv python find`、`py`、PATH の `python` の順。venv の中のものは本体に置き換える）。実行時の依存が無いので `.venv` は要らない。
+タスクスケジューラに、毎日 1 回の scan（タスク「LockWatch scan」）と assess --new（タスク「LockWatch assess」）を登録する。
+assess --new は設定 `auto_assess` を入れたときだけ動き、切っていれば何もせずに終わる（オンオフは設定だけで決まる）。本体の Python の `pythonw.exe` と `scripts\lockwatch-launch.py` で動くので窓は開かない。`scripts\find-pythonw.ps1` が Python 3.11 以上を探す（`.venv` の `home`、`uv python find`、`py`、PATH の `python` の順。venv の中のものは本体に置き換える）。実行時の依存が無いので `.venv` は要らない。
 優先度は「通常より低い」。PC が止まっていて逃した回は、次に起動したときに動く。
 
 ```cmd
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1                :: 登録（毎日 9:00。-At 13:30 で時刻を変える）
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1 -Unregister    :: 消す
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1 -Assess        :: assess --new のタスク「LockWatch assess」を登録（毎日 9:30。-Assess -Unregister で消す）
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1                :: 2 つとも登録（scan は毎日 9:00、assess は 9:30。-At 13:30・-AssessAt 14:00 で時刻を変える）
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1 -Unregister    :: 2 つとも消す
 ```
 
 結果は `data\last-run.log`（毎回上書き）と、タスクの「前回の実行結果」
