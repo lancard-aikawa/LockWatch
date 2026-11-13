@@ -12,6 +12,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from .paths import app_dir
 from .targets import Target, assert_all_public
 
 OFFLINE_FLAGS = ("--offline", "--offline-vulnerabilities", "--no-resolve")
@@ -35,11 +36,14 @@ class Outcome:
 
 
 def find_scanner(configured: str | None) -> str:
-    """osv-scanner の場所。設定が空なら PATH から探す"""
+    """osv-scanner の場所。設定が空なら、プログラムの隣（RepoTether の「道具」が置く。design.md §9.1）、PATH の順に探す"""
     if configured:
         if not Path(configured).is_file():
             raise ScannerError(f"osv-scanner がありません: {configured}")
         return configured
+    beside = app_dir() / "osv-scanner.exe"
+    if beside.is_file():
+        return str(beside)
     found = shutil.which("osv-scanner")
     if not found:
         raise ScannerError("osv-scanner が PATH にありません（設定 osv_scanner で場所を指定できます）")

@@ -41,17 +41,24 @@ if ($Unregister) {
 }
 
 $repo = Split-Path -Parent $PSScriptRoot
-# A base interpreter's pythonw.exe (no .venv needed). find-pythonw.ps1 prints the reason when none is found.
-$pythonw = & (Join-Path $PSScriptRoot "find-pythonw.ps1")
-if ($LASTEXITCODE -ne 0 -or -not $pythonw) {
-    throw "No Python to run the task (see the message above)."
+# The exe build (docs/design.md section 9.1) has lockwatchw.exe (no console) next to scripts\; use it, no Python needed.
+# Otherwise use a base interpreter's pythonw.exe (no .venv needed). find-pythonw.ps1 prints the reason when none is found.
+$exeW = Join-Path $repo "lockwatchw.exe"
+if (Test-Path -LiteralPath $exeW) {
+    $pythonw = $exeW
+    $base = "--log"
+} else {
+    $pythonw = & (Join-Path $PSScriptRoot "find-pythonw.ps1")
+    if ($LASTEXITCODE -ne 0 -or -not $pythonw) {
+        throw "No Python to run the task (see the message above)."
+    }
+    $launcher = Join-Path $repo "scripts\lockwatch-launch.py"
+    $base = "`"$launcher`" --log"
 }
-$launcher = Join-Path $repo "scripts\lockwatch-launch.py"
-if (-not (Get-Command osv-scanner -ErrorAction SilentlyContinue)) {
+if (-not (Get-Command osv-scanner -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath (Join-Path $repo "osv-scanner.exe"))) {
     Write-Warning "osv-scanner is not on PATH (fine if osv_scanner is set in the config)."
 }
 
-$base = "`"$launcher`" --log"
 if ($Data) { $base += " --data `"$Data`"" }
 
 # Run only while the user is logged on (no stored password).

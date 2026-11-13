@@ -12,6 +12,14 @@ def app_dir() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def self_command() -> list[str]:
+    """LockWatch のコマンドを別のプロセスで呼ぶときの頭（design.md §9.1）。
+    exe なら隣のコンソール用の lockwatch.exe（窓を出さない lockwatchw.exe から呼んでも出力を読める）"""
+    if getattr(sys, "frozen", False):
+        return [str(app_dir() / "lockwatch.exe")]
+    return [sys.executable, "-m", "lockwatch"]
+
+
 def default_config_path() -> Path:
     return app_dir() / CONFIG_NAME
 

@@ -659,6 +659,24 @@ SessionVault と同じく、プログラムの置き場所（exe ならそのフ
 - 画面を開いているあいだに定期実行が結果を書いても、自動では読み直さない（「読み直す」ボタン）
 - 結果のタブの「診断書を出す」: `report --html` を別のプロセスで動かし（「隠す」で選んだものは `--hide` で渡す）、終わったら `index.html` を開く
 
+## 9.1 exe で配る（Python の要らない形）
+
+RepoTether の「道具」から入れれば、Python も clone も無しで使えるようにする（2026-11-13、RepoTether の docs/tools-install.md）。
+Release に `LockWatch-<版>-win-x64.zip` を付ける。中身は `LockWatch/` の 1 つのフォルダで、PyInstaller の onedir で固める（`scripts/build-exe.cmd`、`scripts/lockwatch.spec`）。
+
+| ファイル | 役目 |
+|---|---|
+| `lockwatch.exe` | コンソール用。コマンドとして呼ぶ（RepoTether が出力を読む。画面が `scan` などを呼ぶのもこちら） |
+| `lockwatchw.exe` | 窓を出さない版（pythonw に当たる）。画面（`lockwatchw.exe gui`）と定期実行が使う。標準出力は無いので、定期実行は `--log` で `<data>/last-run.log` に書く |
+| `_internal/` | 2 つの exe が共有する Python と LockWatch の中身 |
+| `scripts/register-task.ps1`・`find-pythonw.ps1` | 定期実行の登録。隣に `lockwatchw.exe` があれば Python を探さずにそれを使う |
+| `lockwatch.sample.json`・`README.md`・`LICENSE`・`CHANGELOG.md` | |
+
+- 設定（`lockwatch.json`）とデータ（`data/`）は、リポジトリから動かすときと同じく exe の隣に置く（§8）。zip には入れない。
+  **更新は zip の中身（exe・`_internal/`・`scripts/` など）だけを入れ替え、`lockwatch.json` と `data/` には触らない**（入れ替える側の約束。RepoTether の「道具」がこれを守る）
+- osv-scanner は、設定 `osv_scanner` が空なら、まず exe の隣（`<app>/osv-scanner.exe`）を見て、無ければ PATH から探す（§5）。RepoTether の「道具」は osv-scanner をここに置く
+- 固めるのは Python 3.13（Tk 8.6）と PyInstaller 6.22.3 以上（Tk 9 の Python で固めると、古い PyInstaller では Tcl のデータが集まらず起動時に落ちる）
+
 ## 10. 決めていないこと
 
 - 診断の後に増えた分の自動の調べ（§7.4）を、非公開のリポジトリにも広げるか（広げるならリポジトリごとに有効にする形か）。

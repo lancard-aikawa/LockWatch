@@ -10,7 +10,6 @@ import os
 import queue
 import shutil
 import subprocess
-import sys
 import threading
 import webbrowser
 from pathlib import Path
@@ -23,7 +22,7 @@ from . import config as cfgmod
 from . import exploits, fold, hygiene, store
 from . import packages as pkgmod
 from . import status as statusmod
-from .paths import app_dir, data_dir, targets_path
+from .paths import app_dir, data_dir, self_command, targets_path
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -308,7 +307,7 @@ class App:
         self._run_in_background(f"{label}…", work, done)
 
     def lockwatch(self, *args: str) -> list[str]:
-        return [sys.executable, "-m", "lockwatch", *self._global_args(), *args]
+        return [*self_command(), *self._global_args(), *args]
 
     # ---- 状態のタブ
 

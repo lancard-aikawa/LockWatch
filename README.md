@@ -12,6 +12,14 @@
 
 ## 入れ方
 
+**RepoTether を使っているなら、RepoTether の「道具」から入れられる**（Python も clone も要らない。osv-scanner も一緒に入る）。
+
+自分で入れるときは、[Releases](https://github.com/lancard-aikawa/LockWatch/releases) の `LockWatch-<版>-win-x64.zip` を展開して使ってもよい
+（Python は要らない。`lockwatch.exe` がコマンド、`lockwatchw.exe gui` が画面。設定とデータは exe の隣に置く。docs/design.md §9.1）。
+osv-scanner は下の 1. で入れるか、`osv-scanner.exe` を exe の隣に置く。
+
+ソースから動かすときは次のとおり。
+
 1. osv-scanner 2.6.0 を入れる（版を固定する。新しい版で JSON の形が変わることがあるため）
 
    ```cmd
